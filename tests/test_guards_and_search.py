@@ -28,3 +28,15 @@ def test_hybrid_search_finds_the_right_section(index):
     assert index.search("I was charged twice at the same shop", k=3, lang="en")[0].chunk.id == "disputes#3"
     assert index.search("خصم مرتين من نفس المتجر", k=3, lang="ar")[0].chunk.id == "disputes.ar#3"
     assert index.search("foreign currency fee", k=3, lang="en")[0].chunk.id == "fees#2"
+
+
+def test_query_rewriting_fuses_extra_queries(index):
+    import json
+    from wakeel.llm import Reply, Scripted
+    from wakeel.rag import multi_search, rewrite
+    llm = Scripted(lambda m, t, j: Reply(text=json.dumps({"queries": ["خصم مكرر لدى التاجر نفسه"]})))
+    qs = rewrite(llm, "الفلوس انسحبت مني مرتين يا اخوي", "ar")
+    assert len(qs) == 2
+    assert "disputes.ar#3" in [h.chunk.id for h in multi_search(index, qs, k=3, lang="ar")]
+    # A broken model leaves the original query alone.
+    assert rewrite(Scripted(lambda *a: Reply(text="not json")), "q", "en") == ["q"]

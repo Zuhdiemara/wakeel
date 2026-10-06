@@ -35,7 +35,7 @@ from langgraph.types import Command, interrupt
 from . import guards
 from .ledger import Ledger
 from .llm import LLMError, Reply
-from .rag import Index, rerank
+from .rag import Index, multi_search, rerank, rewrite
 from .text import is_arabic
 from .tools import SCHEMAS, CaseTools, duplicate_groups
 
@@ -180,7 +180,8 @@ def make_graph(deps: Deps, checkpointer=None):
         if cacheable and (hit := deps.cache.get(s["text"], s["lang"])):
             policy, score = hit
             return {"policy": policy, "trace": [_span("policy_agent", t0, cache_hit=True, similarity=round(score, 3), cited=policy["citations"])]}
-        hits = rerank(deps.llm, s["text"], deps.index.search(s["text"], k=6, lang=s["lang"]), k=4)
+        queries = rewrite(deps.llm, s["text"], s["lang"])
+        hits = rerank(deps.llm, s["text"], multi_search(deps.index, queries, k=6, lang=s["lang"]), k=4)
         passages = [{"id": h.chunk.id, "section": h.chunk.section, "text": h.chunk.text} for h in hits]
         ids = {p["id"] for p in passages}
         rep = _ask(deps, [
@@ -201,7 +202,7 @@ def make_graph(deps: Deps, checkpointer=None):
         if cacheable and grounded:
             deps.cache.put(s["text"], s["lang"], policy)
         return {"policy": policy,
-                "trace": [_span("policy_agent", t0, rep, retrieved=[p["id"] for p in passages], cited=cited, grounded=grounded)]}
+                "trace": [_span("policy_agent", t0, rep, queries=queries[1:], retrieved=[p["id"] for p in passages], cited=cited, grounded=grounded)]}
 
     def ops_agent(s: State) -> dict:
         t0 = time.monotonic()

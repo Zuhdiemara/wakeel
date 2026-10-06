@@ -25,6 +25,8 @@ def scripted(ops_plan, reply_text="", supervisor_intent="duplicate_charge", fake
         system = msgs[0]["content"]
         if "triage" in system:
             return Reply(text=json.dumps({"intent": supervisor_intent}), tokens_in=50, tokens_out=8)
+        if "Rewrite a bank customer's question" in system:
+            return Reply(text=json.dumps({"queries": ["duplicate charge"]}))
         if "grade search results" in system:
             n = msgs[1]["content"].count("\n\n[") + 1
             return Reply(text=json.dumps({"scores": [3] + [1] * (n - 1)}))

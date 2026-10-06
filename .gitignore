@@ -7,3 +7,5 @@ __pycache__/
 .pytest_cache/
 evals/results.model.json
 .data/
+evals/judge.json
+evals/compare.json
