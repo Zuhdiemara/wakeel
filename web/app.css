@@ -19,3 +19,8 @@ ol#trace li b{font-size:14px}ol#trace code{font-size:12px;word-break:break-word}
 .pill{display:inline-block;border-radius:99px;padding:1px 8px;font-size:12px;font-weight:600;background:var(--panel);border:1px solid var(--line)}.pill.ok{color:var(--accent)}.pill.warn{color:var(--warn)}.pill.bad{color:var(--bad)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:14px;margin:8px 0}.kv dt{color:var(--muted)}.kv dd{margin:0}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.list{list-style:none;padding:0;margin:0;display:grid;gap:6px;font-size:13px}.list li{background:var(--soft);border-radius:8px;padding:6px 10px}
+.list button{min-height:28px;padding:2px 8px;font-size:12px;margin-inline-start:6px}
+ol#trace li.new{animation:pop .35s ease-out}@keyframes pop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){ol#trace li.new{animation:none}}
+html[dir="rtl"] ol#trace li{border-radius:8px 0 0 8px}

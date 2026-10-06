@@ -317,26 +317,68 @@ def _template(s: State, facts: dict) -> str:
 
 
 class Agent:
-    """A thin service around the graph: start a case, read it, decide on it."""
+    """A thin service around the graph: start a case, read it, decide on it.
+    With a Store, every case is indexed and every step that matters is written
+    to the hash-chained audit trail."""
 
-    def __init__(self, deps: Deps):
-        self.deps = deps
-        self.graph = make_graph(deps)
+    def __init__(self, deps: Deps, checkpointer=None, store=None, on_spans=None):
+        self.deps, self.store, self.on_spans = deps, store, on_spans
+        self.graph = make_graph(deps, checkpointer)
 
     def _cfg(self, case_id: str) -> dict:
         return {"configurable": {"thread_id": case_id}}
 
+    def _record(self, before: int, c: dict) -> None:
+        new = c.get("trace", [])[before:]
+        if self.on_spans:
+            self.on_spans(new, (c.get("ops") or {}).get("steps") if any(s["node"] == "ops_agent" for s in new) else None, c)
+        if not self.store:
+            return
+        self.store.upsert_case(c)
+        for s in new:
+            if s["node"] == "intake":
+                self.store.audit(c["case_id"], "customer:" + c["customer"], "case_opened", {"lang": s.get("lang"), "pii_masked": s.get("pii")})
+            elif s["node"] == "ops_agent" and c.get("proposal"):
+                p = c["proposal"]
+                self.store.audit(c["case_id"], "agent", "refund_proposed", {k: p[k] for k in ("transaction_id", "amount", "reason", "policy_section")})
+            elif s["node"] == "approval":
+                d = c.get("decision") or {}
+                self.store.audit(c["case_id"], "reviewer:" + d.get("reviewer", "?"), "approved" if d.get("approved") else "rejected", {"note": d.get("note", "")})
+            elif s["node"] == "execute":
+                r = c.get("refund") or {}
+                self.store.audit(c["case_id"], "system", "refund_executed" if r.get("ok") else "refund_failed", {"amount": r.get("amount"), "ref": r.get("ref"), "replayed": r.get("replayed"), "key": s.get("key")})
+            elif s["node"] == "handoff":
+                self.store.audit(c["case_id"], "agent", "handed_off", {"intent": s.get("intent")})
+
     def start(self, customer: str, message: str, case_id: str | None = None) -> dict:
         case_id = case_id or f"case_{uuid.uuid4().hex[:10]}"
         self.graph.invoke({"case_id": case_id, "customer": customer, "message": message, "trace": []}, self._cfg(case_id))
-        return self.get(case_id)
+        c = self.get(case_id)
+        self._record(0, c)
+        return c
+
+    def stream(self, customer: str, message: str, case_id: str | None = None):
+        """Yields each step as it finishes (for a live UI), then the case."""
+        case_id = case_id or f"case_{uuid.uuid4().hex[:10]}"
+        for update in self.graph.stream({"case_id": case_id, "customer": customer, "message": message, "trace": []}, self._cfg(case_id), stream_mode="updates"):
+            for node, delta in update.items():
+                if node.startswith("__"):
+                    continue
+                for span in (delta or {}).get("trace", []):
+                    yield {"type": "step", "span": span}
+        c = self.get(case_id)
+        self._record(0, c)
+        yield {"type": "case", "case": c}
 
     def decide(self, case_id: str, approved: bool, reviewer: str, note: str = "") -> dict:
         snap = self.graph.get_state(self._cfg(case_id))
         if not snap.next:                         # already decided: idempotent for double clicks
             return self.get(case_id)
+        before = len(snap.values.get("trace", []))
         self.graph.invoke(Command(resume={"approved": approved, "reviewer": reviewer, "note": note}), self._cfg(case_id))
-        return self.get(case_id)
+        c = self.get(case_id)
+        self._record(before, c)
+        return c
 
     def get(self, case_id: str) -> dict:
         snap = self.graph.get_state(self._cfg(case_id))

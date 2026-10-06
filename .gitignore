@@ -6,3 +6,4 @@ __pycache__/
 !.env.example
 .pytest_cache/
 evals/results.model.json
+.data/

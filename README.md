@@ -56,6 +56,10 @@ flowchart LR
 | **PII / PDPL** | Card numbers (Luhn-checked; the last four kept), Saudi ID and Iqama numbers, IBANs, phone numbers and emails are masked **before** any model or log sees them. Only the masked text is stored. |
 | **Models** | One interface, with adapters for Gemini, Groq (OpenAI-compatible, so OpenAI too) and Claude, in plain HTTP. **Fallback:** rate limits and outages move to the next provider; a bad request does not. **Degradation:** if every provider is down, each node falls back to deterministic rules and cases still progress. |
 | **Observability** | Every step records its node, latency, provider, model, tokens, tool calls, retrieved and cited ids, and fallbacks. The demo page shows the trace for each case. |
+| **Durable state** | **Checkpoints:** LangGraph checkpoints in SQLite, so a case awaiting approval survives a restart and a new process can resume it (tested). **Index:** a case index feeds the reviewer queue (`GET /api/cases?status=awaiting_approval`). |
+| **Audit trail** | Every opening, proposal, decision and refund is written to an append-only, hash-chained log (database triggers block edits). `GET /api/audit/verify` recomputes the chain and names the first broken entry; a test edits one and catches it. |
+| **Streaming** | `POST /api/cases/stream` sends each graph step as a server-sent event as it finishes, so the page shows the agent working live. |
+| **Metrics** | `GET /metrics` serves Prometheus metrics: cases by status and intent, human decisions, model calls and tokens by provider, provider fallbacks, tool calls and errors, and time per node. |
 | **MCP** | `python -m wakeel.mcp_server` serves the same four tools over stdio to any MCP client, with the same guarantees. |
 | **Deploy** | **Docker:** non-root image. **Kubernetes:** probes, an HPA and Secrets. **Render:** a free blueprint. **CI:** tests, evaluations, a container smoke test and an image push. |
 

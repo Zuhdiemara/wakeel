@@ -9,18 +9,18 @@
 <body>
 <header>
   <div><b>Wakeel</b> <span class="ar">وكيل</span> <span class="muted">· a card-dispute agent for Sahm Bank (fictional)</span></div>
-  <div class="muted small" id="health">…</div>
+  <div class="row" style="margin:0;align-items:center"><span class="muted small" id="health">…</span><button class="small-btn" id="lang" type="button" style="margin:0">العربية</button></div>
 </header>
 <main>
   <section class="col" aria-labelledby="h-customer">
-    <h2 id="h-customer">1 · Customer</h2>
+    <h2 id="h-customer" data-t="customer">1 · Customer</h2>
     <label class="small muted" for="customer">Signed in as</label>
     <select id="customer"></select>
     <div class="chips" id="examples"></div>
     <form id="ask">
       <label class="sr" for="msg">Message</label>
       <textarea id="msg" rows="4" dir="auto" maxlength="2000" placeholder="Describe the problem, in English or Arabic"></textarea>
-      <button class="primary" type="submit" id="send">Send</button>
+      <button class="primary" type="submit" id="send" data-t="send">Send</button>
     </form>
     <div id="reply" class="bubble" dir="auto" hidden></div>
     <h3>Transactions</h3>
@@ -28,13 +28,18 @@
     <button class="small-btn" id="reset" type="button">Reset demo data</button>
   </section>
   <section class="col" aria-labelledby="h-trace">
-    <h2 id="h-trace">2 · What the agent did</h2>
-    <div id="summary" class="muted small">Send a message to start a case.</div>
+    <h2 id="h-trace" data-t="trace">2 · What the agent did</h2>
+    <div id="summary" class="muted small" data-t="start">Send a message to start a case.</div>
     <ol id="trace"></ol>
   </section>
   <section class="col" aria-labelledby="h-review">
-    <h2 id="h-review">3 · Bank reviewer</h2>
-    <div id="review" class="muted small">No refund is waiting for approval.</div>
+    <h2 id="h-review" data-t="reviewer">3 · Bank reviewer</h2>
+    <div id="review" class="muted small" data-t="none">No refund is waiting for approval.</div>
+    <h3 data-t="queue">Approval queue</h3>
+    <ul id="queue" class="list"></ul>
+    <h3 data-t="audit">Audit trail</h3>
+    <div class="muted small" id="auditOk"></div>
+    <ol id="audit" class="list"></ol>
   </section>
 </main>
 <footer class="muted small">Sahm Bank, its customers and policies are fictional. No real money moves. Personal data is masked before any model sees it.</footer>
