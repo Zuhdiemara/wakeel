@@ -74,6 +74,7 @@ class Deps:
     ledger: Ledger
     now: datetime | None = None
     token_budget: int = 30000      # per case; past it, the tool loop stops and rules finish the case
+    cache: Any = None              # a SemanticCache for policy answers, or None
 
 
 def _span(node: str, t0: float, rep: Reply | None = None, **extra) -> dict:
@@ -174,6 +175,11 @@ def make_graph(deps: Deps, checkpointer=None):
 
     def policy_agent(s: State) -> dict:
         t0 = time.monotonic()
+        # Only answers about policy alone are cached; ledger cases always run fresh.
+        cacheable = deps.cache is not None and s["intent"] not in LEDGER_INTENTS
+        if cacheable and (hit := deps.cache.get(s["text"], s["lang"])):
+            policy, score = hit
+            return {"policy": policy, "trace": [_span("policy_agent", t0, cache_hit=True, similarity=round(score, 3), cited=policy["citations"])]}
         hits = rerank(deps.llm, s["text"], deps.index.search(s["text"], k=6, lang=s["lang"]), k=4)
         passages = [{"id": h.chunk.id, "section": h.chunk.section, "text": h.chunk.text} for h in hits]
         ids = {p["id"] for p in passages}
@@ -191,7 +197,10 @@ def make_graph(deps: Deps, checkpointer=None):
             cited, grounded, answer = [], False, ""
         if not grounded and passages:                                # extractive fallback
             cited, answer = [passages[0]["id"]], passages[0]["text"]
-        return {"policy": {"answer": answer, "citations": cited, "passages": passages},
+        policy = {"answer": answer, "citations": cited, "passages": passages}
+        if cacheable and grounded:
+            deps.cache.put(s["text"], s["lang"], policy)
+        return {"policy": policy,
                 "trace": [_span("policy_agent", t0, rep, retrieved=[p["id"] for p in passages], cited=cited, grounded=grounded)]}
 
     def ops_agent(s: State) -> dict:

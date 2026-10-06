@@ -23,6 +23,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from . import llm as llms
 from . import metrics, otel
 from .graph import Agent, Deps
+from .cache import SemanticCache
 from .store import Store
 from .ledger import DaftarLedger, demo_ledger
 from .rag import Index, embedder_from_env, load_corpus
@@ -67,7 +68,11 @@ def build(db_path: str | None = None) -> tuple[Agent, dict]:
     info.update({"models": model.name if model else "none (rules mode)", "embeddings": index.embedder.name,
                  "ledger": "daftar" if os.getenv("DAFTAR_URL") else "in-memory demo", "chunks": len(index.chunks), "state": "sqlite",
                  "tracing": "otlp" if tracer else "off"})
-    return Agent(Deps(model, index, ledger), checkpointer=SqliteSaver(conn), store=store, on_spans=on_spans), info
+    import hashlib
+    corpus_version = hashlib.sha256("".join(c.text for c in index.chunks).encode()).hexdigest()[:12]
+    cache = SemanticCache(index.embedder, corpus_version)
+    info["cache"] = {"corpus_version": corpus_version}
+    return Agent(Deps(model, index, ledger, cache=cache), checkpointer=SqliteSaver(conn), store=store, on_spans=on_spans), info
 
 
 agent, info = build()
@@ -104,7 +109,8 @@ class Decision(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, **info}
+    c = agent.deps.cache
+    return {"ok": True, **info, **({"cache_hits": c.hits, "cache_misses": c.misses} if c else {})}
 
 
 @app.post("/api/cases")
