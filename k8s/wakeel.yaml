@@ -3,9 +3,9 @@
 #   kubectl create secret generic wakeel-keys --from-literal=GEMINI_API_KEY=... --from-literal=GROQ_API_KEY=...
 #   kubectl apply -f k8s/wakeel.yaml
 #
-# Note: cases awaiting approval live in the in-process checkpointer. With more
-# than one replica, use a shared checkpointer (langgraph-checkpoint-postgres)
-# or sticky sessions; see the README, "From demo to production".
+# Note: checkpoints, the case index and the audit trail are in SQLite on the
+# pod's volume. With more than one replica, use a shared database
+# (langgraph-checkpoint-postgres); see the README, "From demo to production".
 apiVersion: apps/v1
 kind: Deployment
 metadata:

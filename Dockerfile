@@ -6,7 +6,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY wakeel wakeel
 COPY corpus corpus
 COPY web web
-RUN useradd --uid 10001 --create-home wakeel && mkdir -p .cache && chown wakeel .cache
+RUN useradd --uid 10001 --create-home wakeel && mkdir -p .cache .data && chown wakeel .cache .data
+ENV WAKEEL_DB=/app/.data/wakeel.db
+VOLUME /app/.data
 USER 10001
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request,os;urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/api/health')"
