@@ -69,8 +69,17 @@ async function txns() {
     t.map(x => `<tr><td>${esc(x.id)}</td><td>${esc(x.merchant)}</td><td class="num">${sar(x.amount)}</td><td>${esc(x.at.slice(0, 10))}</td><td class="num">${x.refunded ? sar(x.refunded) : ""}</td></tr>`).join("");
 }
 
+function pipe(trace, status) {
+  const seen = new Set(trace.map(t => t.node));
+  document.querySelectorAll("#pipe span").forEach(el => {
+    el.classList.toggle("done", seen.has(el.dataset.node));
+    el.classList.toggle("wait", (status === "awaiting_approval" && el.dataset.node === "approval") || (status === "needs_info" && el.dataset.node === "clarify"));
+  });
+}
+
 function render(c) {
   current = c;
+  pipe(c.trace || [], c.status);
   audit(c.case_id);
   queue();
   const status = {needs_info: "warn", awaiting_approval: "warn", refunded: "ok", answered: "ok", handed_off: "warn", rejected: "bad"}[c.status] || "";
@@ -124,6 +133,8 @@ async function streamCase(body) {
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
   $("#trace").innerHTML = "";
   $("#reply").hidden = true;
+  const live = [];
+  pipe([], "");
   $("#summary").textContent = t("working");
   const reader = r.body.getReader(), dec = new TextDecoder();
   let buf = "";
@@ -139,6 +150,7 @@ async function streamCase(body) {
       const ev = JSON.parse(data.slice(6));
       if (ev.type === "step") {
         const s = ev.span;
+        live.push(s); pipe(live, "");
         $("#trace").insertAdjacentHTML("beforeend", `<li class="new"><b>${esc(s.node)}</b> <span class="muted">${s.ms} ms${s.provider ? ` · ${esc(s.provider)}` : ""}</span></li>`);
       } else if (ev.type === "case") render(ev.case);
     }

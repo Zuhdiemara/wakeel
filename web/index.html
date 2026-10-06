@@ -29,6 +29,11 @@
   </section>
   <section class="col" aria-labelledby="h-trace">
     <h2 id="h-trace" data-t="trace">2 · What the agent did</h2>
+    <div class="pipe" id="pipe" aria-label="Agent steps">
+      <span data-node="intake">intake</span><span data-node="supervisor">supervisor</span><span data-node="policy_agent">policy</span>
+      <span data-node="ops_agent">operations</span><span data-node="clarify">ask customer</span><span data-node="approval">approval</span>
+      <span data-node="execute">refund</span><span data-node="respond">reply</span><span data-node="handoff">to a person</span>
+    </div>
     <div id="summary" class="muted small" data-t="start">Send a message to start a case.</div>
     <ol id="trace"></ol>
   </section>
