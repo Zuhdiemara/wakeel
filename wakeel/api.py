@@ -167,6 +167,18 @@ def decide(case_id: str, body: Decision, x_reviewer_token: str | None = Header(d
     return agent.decide(case_id, body.approved, body.reviewer, body.note)
 
 
+class Answer(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+
+
+@app.post("/api/cases/{case_id}/reply")
+def customer_reply(case_id: str, body: Answer):
+    """The customer answers the agent's clarifying question."""
+    if not agent.get(case_id).get("case_id"):
+        raise HTTPException(404, "no such case")
+    return agent.reply(case_id, body.message)
+
+
 @app.get("/api/customers")
 def customers():
     return DEMO_CUSTOMERS

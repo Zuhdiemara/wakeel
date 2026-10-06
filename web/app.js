@@ -4,6 +4,7 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "
 const sar = h => (h / 100).toFixed(2) + " SAR";
 const EXAMPLES = [
   "I was charged twice at Jarir Bookstore last week",
+  "I was charged twice last week",
   "تم خصم المبلغ مرتين من مكتبة جرير",
   "Why is there a foreign transaction fee on my statement?",
   "Nahdi Pharmacy charged me twice back in July",
@@ -72,7 +73,7 @@ function render(c) {
   current = c;
   audit(c.case_id);
   queue();
-  const status = {awaiting_approval: "warn", refunded: "ok", answered: "ok", handed_off: "warn", rejected: "bad"}[c.status] || "";
+  const status = {needs_info: "warn", awaiting_approval: "warn", refunded: "ok", answered: "ok", handed_off: "warn", rejected: "bad"}[c.status] || "";
   $("#summary").innerHTML = `Case <code>${esc(c.case_id)}</code> · <span class="pill ${status}">${esc(c.status)}</span> · intent <b>${esc(c.intent)}</b> · ${esc(c.lang)}` +
     (c.pii?.length ? ` · masked: ${esc(c.pii.join(", "))}` : "") + (c.injection?.length ? ` · <span class="pill bad">injection screen</span>` : "");
   const tokens = c.trace.reduce((a, t) => a + (t.tokens_in || 0) + (t.tokens_out || 0), 0);
@@ -83,8 +84,17 @@ function render(c) {
       extra.map(([k, v]) => `${esc(k)}: <code>${esc(typeof v === "object" ? JSON.stringify(v) : v)}</code>`).join(" · ") + `</li>`;
   }).join("") + (c.ops?.steps?.length ? `<li><b>tool calls</b><br>${c.ops.steps.map(s => `<code>${esc(s.tool)}(${esc(JSON.stringify(s.args))})</code> → <code>${esc(JSON.stringify(s.result).slice(0, 220))}</code>`).join("<br>")}</li>` : "");
   const r = $("#reply");
-  r.hidden = !c.reply;
-  r.textContent = c.reply || "";
+  if (c.status === "needs_info" && c.question) {
+    r.hidden = false;
+    r.innerHTML = `<b>${esc(c.question.question)}</b><div class="chips" style="margin-top:8px">${(c.question.options || []).map(o => `<button type="button" data-answer="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
+    r.querySelectorAll("[data-answer]").forEach(b => b.onclick = async () => {
+      r.querySelectorAll("button").forEach(x => x.disabled = true);
+      render(await api("POST", `/api/cases/${c.case_id}/reply`, {message: b.dataset.answer}));
+    });
+  } else {
+    r.hidden = !c.reply;
+    r.textContent = c.reply || "";
+  }
   const p = c.proposal;
   if (c.status === "awaiting_approval" && p) {
     $("#review").innerHTML = `<p>The agent proposes a refund. Nothing moves until you decide.</p>

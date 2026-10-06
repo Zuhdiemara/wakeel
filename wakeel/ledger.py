@@ -91,6 +91,8 @@ def demo_ledger(now: datetime | None = None) -> MemoryLedger:
         Txn("tx_1004", "Noon.com", 120000, iso(timedelta(days=20))),
         Txn("tx_1005", "Amazon.com (USD)", 37200, iso(timedelta(days=9))),
         Txn("tx_1006", "Foreign transaction fee", 930, iso(timedelta(days=9))),
+        Txn("tx_1009", "HungerStation", 8750, iso(timedelta(days=1, hours=5))),
+        Txn("tx_1010", "HungerStation", 8750, iso(timedelta(days=1, hours=4, minutes=58))),
         Txn("tx_1007", "Nahdi Pharmacy", 6500, iso(timedelta(days=75))),
         Txn("tx_1008", "Nahdi Pharmacy", 6500, iso(timedelta(days=75, minutes=-3))),
     ]

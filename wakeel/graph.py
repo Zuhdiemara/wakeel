@@ -57,6 +57,8 @@ class State(TypedDict, total=False):
     policy: dict               # {"answer", "citations", "passages"}
     ops: dict                  # {"summary", "steps"}
     proposal: dict | None
+    question: dict | None      # a clarifying question for the customer
+    clarified: bool
     decision: dict | None
     refund: dict | None
     reply: str
@@ -159,8 +161,10 @@ def make_graph(deps: Deps, checkpointer=None):
             return "handoff"
         if "policy" not in s:
             return "policy_agent"
-        if intent in LEDGER_INTENTS and "ops" not in s:
+        if intent in LEDGER_INTENTS and not s.get("ops"):
             return "ops_agent"
+        if s.get("question") and not s.get("clarified"):
+            return "clarify"
         if s.get("proposal") and not s.get("decision"):
             return "approval"
         if s.get("decision", {}) and s["decision"].get("approved") and not s.get("refund"):
@@ -219,25 +223,44 @@ def make_graph(deps: Deps, checkpointer=None):
                 break
             msgs.append({"role": "assistant", "content": rep.text, "tool_calls": [{"id": c.id, "name": c.name, "args": c.args} for c in rep.tool_calls]})
             for c in rep.tool_calls:
-                result = tools.call(c.name, c.args)
+                if c.name == "ask_customer" and s.get("clarified"):
+                    result = json.dumps({"error": "you already asked once; decide with what you have"})
+                else:
+                    result = tools.call(c.name, c.args)
                 steps.append({"tool": c.name, "args": c.args, "result": json.loads(result)})
                 msgs.append({"role": "tool", "tool_call_id": c.id, "name": c.name, "content": result})
+            if tools.question:
+                break
         if (not used_model or (over_budget and not tools.proposal)) and s["intent"] == "duplicate_charge":   # rules: the same procedure, without a model
             dup = json.loads(tools.call("find_duplicates", {}))
             steps.append({"tool": "find_duplicates", "args": {}, "result": dup})
             named = [g for g in dup["groups"] if _mentions(s["text"], g["merchant"])]
-            # Only the merchant the customer complained about; if they named none
-            # and exactly one duplicate exists, that one (a human still approves).
-            candidates = named or (dup["groups"] if len(dup["groups"]) == 1 else [])
+            eligible = [g for g in dup["groups"] if g["within_report_window"]]
+            # Only the merchant the customer complained about. If they named none:
+            # one eligible duplicate is unambiguous; several means ask, once.
+            candidates = named or (eligible if len(eligible) == 1 else [])
+            if not named and len(eligible) > 1 and not s.get("clarified"):
+                ar = s["lang"] == "ar"
+                q = {"question": "أي تاجر تقصد؟" if ar else "Which merchant charged you twice?", "options": [g["merchant"] for g in eligible]}
+                steps.append({"tool": "ask_customer", "args": q, "result": json.loads(tools.call("ask_customer", q))})
             for g in candidates:
                 if g["within_report_window"]:
                     args = {"transaction_id": g["duplicates"][0], "amount_sar": g["amount_sar"], "reason": "duplicate_charge", "policy_section": "disputes#3"}
                     steps.append({"tool": "propose_refund", "args": args, "result": json.loads(tools.call("propose_refund", args))})
                     break
             summary = "rules: " + ("refund proposed" if tools.proposal else "no qualifying duplicate for the merchant named")
-        return {"ops": {"summary": summary, "steps": steps}, "proposal": tools.proposal,
+        return {"ops": {"summary": summary, "steps": steps}, "proposal": tools.proposal, "question": tools.question,
                 "trace": spans + [_span("ops_agent", t0, steps=len(steps), proposed=bool(tools.proposal), tokens_spent=spent, over_budget=over_budget,
                                          mode="model" if used_model and not over_budget else "rules")]}
+
+    def clarify(s: State) -> dict:
+        """Pauses until the customer answers; the answer is masked like any
+        message, then the operations agent runs again with it."""
+        t0 = time.monotonic()
+        answer = interrupt({"kind": "customer", "case_id": s["case_id"], **s["question"]})
+        text, pii = guards.redact(str(answer.get("message", ""))[:2000])
+        return {"text": s["text"] + "\nCustomer: " + text, "clarified": True, "ops": None, "question": None,
+                "trace": [_span("clarify", t0, pii=pii)]}
 
     def approval(s: State) -> dict:
         t0 = time.monotonic()
@@ -297,12 +320,12 @@ def make_graph(deps: Deps, checkpointer=None):
 
     g = StateGraph(State)
     for name, fn in [("intake", intake), ("supervisor", supervisor), ("policy_agent", policy_agent), ("ops_agent", ops_agent),
-                     ("approval", approval), ("execute", execute), ("handoff", handoff), ("respond", respond)]:
+                     ("approval", approval), ("clarify", clarify), ("execute", execute), ("handoff", handoff), ("respond", respond)]:
         g.add_node(name, fn)
     g.add_edge(START, "intake")
     g.add_edge("intake", "supervisor")
-    g.add_conditional_edges("supervisor", route, ["policy_agent", "ops_agent", "approval", "execute", "handoff", "respond"])
-    for worker in ("policy_agent", "ops_agent", "approval", "execute"):
+    g.add_conditional_edges("supervisor", route, ["policy_agent", "ops_agent", "approval", "clarify", "execute", "handoff", "respond"])
+    for worker in ("policy_agent", "ops_agent", "approval", "clarify", "execute"):
         g.add_edge(worker, "supervisor")
     g.add_edge("handoff", END)
     g.add_edge("respond", END)
@@ -357,6 +380,10 @@ class Agent:
             elif s["node"] == "execute":
                 r = c.get("refund") or {}
                 self.store.audit(c["case_id"], "system", "refund_executed" if r.get("ok") else "refund_failed", {"amount": r.get("amount"), "ref": r.get("ref"), "replayed": r.get("replayed"), "key": s.get("key")})
+            elif s["node"] == "ops_agent" and c.get("question"):
+                self.store.audit(c["case_id"], "agent", "asked_customer", {"question": c["question"]["question"]})
+            elif s["node"] == "clarify":
+                self.store.audit(c["case_id"], "customer:" + c["customer"], "answered", {"pii_masked": s.get("pii")})
             elif s["node"] == "handoff":
                 self.store.audit(c["case_id"], "agent", "handed_off", {"intent": s.get("intent")})
 
@@ -382,10 +409,21 @@ class Agent:
 
     def decide(self, case_id: str, approved: bool, reviewer: str, note: str = "") -> dict:
         snap = self.graph.get_state(self._cfg(case_id))
-        if not snap.next:                         # already decided: idempotent for double clicks
+        if "approval" not in snap.next:           # already decided (a double click), or not awaiting approval
             return self.get(case_id)
         before = len(snap.values.get("trace", []))
         self.graph.invoke(Command(resume={"approved": approved, "reviewer": reviewer, "note": note}), self._cfg(case_id))
+        c = self.get(case_id)
+        self._record(before, c)
+        return c
+
+    def reply(self, case_id: str, message: str) -> dict:
+        """The customer answers a clarifying question."""
+        snap = self.graph.get_state(self._cfg(case_id))
+        if "clarify" not in snap.next:
+            return self.get(case_id)
+        before = len(snap.values.get("trace", []))
+        self.graph.invoke(Command(resume={"message": message}), self._cfg(case_id))
         c = self.get(case_id)
         self._record(before, c)
         return c
@@ -395,6 +433,8 @@ class Agent:
         v = dict(snap.values)
         if snap.next and "approval" in snap.next:
             v["status"] = "awaiting_approval"
+        elif snap.next and "clarify" in snap.next:
+            v["status"] = "needs_info"
         v["next"] = list(snap.next)
         v.pop("message", None)                    # only the redacted text leaves the agent
         return v

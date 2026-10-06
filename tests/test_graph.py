@@ -125,3 +125,14 @@ def test_a_runaway_tool_loop_stops_at_the_token_budget(index):
     ops = next(t for t in c["trace"] if t["node"] == "ops_agent")
     assert ops["over_budget"] and ops["tokens_spent"] < 30000
     assert c["proposal"]["transaction_id"] == "tx_1002"          # rules still finished the case
+
+
+def test_the_agent_asks_which_merchant_when_several_qualify(make_agent):
+    agent, ledger = make_agent(None)
+    c = agent.start("sara", "I was charged twice last week")
+    assert c["status"] == "needs_info" and set(c["question"]["options"]) == {"Jarir Bookstore", "HungerStation"}
+    assert agent.decide(c["case_id"], True, "r")["status"] == "needs_info"      # nothing to approve yet
+    c = agent.reply(c["case_id"], "It was Jarir, card 4111 1111 1111 1111")
+    assert c["status"] == "awaiting_approval" and c["proposal"]["transaction_id"] == "tx_1002"
+    assert "4111 1111" not in c["text"]                                        # the answer is masked too
+    assert agent.decide(c["case_id"], True, "r")["status"] == "refunded" and ledger.refund_calls == 1

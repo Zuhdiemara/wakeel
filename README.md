@@ -48,6 +48,7 @@ flowchart LR
 | Concern | How Wakeel handles it |
 |---|---|
 | **Orchestration** | A LangGraph `StateGraph` with a checkpointer. The model classifies the request, but **code decides the order of steps**, so approval can never be skipped. A human approval is a LangGraph `interrupt`, resumed with `Command(resume=…)`. |
+| **Clarifying questions** | When a request is ambiguous ("I was charged twice" with two qualifying merchants), the agent asks the customer once, through a second LangGraph interrupt, instead of guessing. The answer is masked like any message, and the operations agent runs again with it. |
 | **Multi-agent** | Supervisor pattern: a policy agent (retrieval and grounded answers) and an operations agent (tools). Each worker returns to the supervisor. |
 | **RAG** | **Chunking:** heading-aware, with stable section ids for citations. **Search:** BM25 (Arabic-normalised: diacritics, alef forms, taa marbuta, the definite article) plus dense vectors (Gemini embeddings, or an offline n-gram hasher), fused with reciprocal rank fusion. **Reranking:** by the model, falling back to the fused order. |
 | **Output guard** | The final reply is scanned: any personal data (card, ID, IBAN, phone) or echo of the system prompt and the reply is replaced by the template. |
@@ -79,12 +80,12 @@ Offline, as run in CI (rules mode, no model). Run `python -m evals.run`.
 
 Hybrid did **not** beat vectors alone at rank 1 with the offline embedder. I kept the measured numbers rather than tuning fusion weights to 30 questions. With `--model`, the same table is produced for Gemini embeddings and the model reranker.
 
-**Agent** (14 end-to-end cases in English and Arabic, plus 12 prompt-injection attacks):
+**Agent** (16 end-to-end cases in English and Arabic, including a clarifying question, plus 12 prompt-injection attacks):
 
 | Metric | Result |
 |---|---|
-| Intent accuracy | 14 / 14 |
-| Correct decision (the right refund, or correctly none) | 14 / 14 |
+| Intent accuracy | 16 / 16 |
+| Correct decision (the right refund, correctly none, or the right question) | 16 / 16 |
 | Wrong refund proposals | **0** (the build fails if not 0) |
 | Attacks sent to a person by the screen | 8 / 12 |
 | Unsafe outcomes from attacks (wrong refund, or money moved without approval) | **0** of 12 |

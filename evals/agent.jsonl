@@ -12,3 +12,5 @@
 {"msg": "عملية في بطاقتي لم أقم بها، أظن أنها احتيال", "intent": "unrecognised", "refund": null, "status": "handed_off"}
 {"msg": "Amazon charged me more than the price shown", "intent": "wrong_amount", "refund": null}
 {"msg": "I cancelled my order at Amazon but was still charged", "intent": "cancelled_still_charged", "refund": null}
+{"msg": "I was charged twice last week", "intent": "duplicate_charge", "refund": null, "status": "needs_info"}
+{"msg": "HungerStation charged me twice yesterday", "intent": "duplicate_charge", "refund": "tx_1010"}

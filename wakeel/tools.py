@@ -26,6 +26,8 @@ SCHEMAS = [
      "parameters": {"type": "object", "properties": {"merchant": {"type": "string"}, "days": {"type": "integer", "description": "How far back, default 90"}}}},
     {"name": "find_duplicates", "description": "Groups of identical transactions (same merchant and amount within 24 hours). The first in each group is the original; the rest are duplicates.",
      "parameters": {"type": "object", "properties": {}}},
+    {"name": "ask_customer", "description": "Ask the customer one short question when the request is ambiguous, for example which merchant when several duplicates qualify. Use at most once.",
+     "parameters": {"type": "object", "properties": {"question": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}}}, "required": ["question"]}},
     {"name": "propose_refund", "description": "Propose a refund for a human to approve. Does not move money. Amount in SAR.",
      "parameters": {"type": "object", "properties": {
          "transaction_id": {"type": "string"}, "amount_sar": {"type": "number"},
@@ -56,6 +58,7 @@ class CaseTools:
         self.customer, self.ledger, self.index, self.rerank_llm, self.lang = customer, ledger, index, rerank_llm, lang
         self.now = now or datetime.now(timezone.utc)
         self.proposal: dict | None = None
+        self.question: dict | None = None
         self.cited: set[str] = set()
 
     def call(self, name: str, args: dict) -> str:
@@ -84,6 +87,10 @@ class CaseTools:
             out.append({"merchant": g[0].merchant, "amount_sar": g[0].amount / 100, "original": g[0].id,
                         "duplicates": [t.id for t in g[1:]], "days_ago": age, "within_report_window": age <= REPORT_DAYS})
         return {"groups": out}
+
+    def t_ask_customer(self, question: str, options: list[str] | None = None) -> dict:
+        self.question = {"question": question[:300], "options": [str(o)[:80] for o in (options or [])][:6]}
+        return {"asked": True, "note": "Stop here; the customer's answer will come back as a new message."}
 
     def t_propose_refund(self, transaction_id: str, amount_sar: float, reason: str, policy_section: str) -> dict:
         txns = {t.id: t for t in self.ledger.transactions(self.customer)}
