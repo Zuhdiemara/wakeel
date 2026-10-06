@@ -1,0 +1,9 @@
+[project]
+name = "wakeel"
+version = "1.0.0"
+description = "A card-dispute agent for a fictional Saudi bank: LangGraph, hybrid RAG, tool calling, MCP, human approval, evals."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]

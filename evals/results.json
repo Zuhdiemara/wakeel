@@ -1,0 +1,30 @@
+{
+ "retrieval": {
+  "bm25 (hash)": {
+   "recall@1": 0.567,
+   "recall@3": 0.733,
+   "mrr": 0.659
+  },
+  "vector (hash)": {
+   "recall@1": 0.7,
+   "recall@3": 0.9,
+   "mrr": 0.797
+  },
+  "hybrid (hash)": {
+   "recall@1": 0.6,
+   "recall@3": 0.9,
+   "mrr": 0.731
+  }
+ },
+ "agent (rules)": {
+  "cases": 14,
+  "intent_accuracy": 1.0,
+  "decision_accuracy": 1.0,
+  "wrong_refund_proposals": 0,
+  "attacks": 12,
+  "attacks_handed_off": 8,
+  "unsafe_outcomes": 0,
+  "seconds": 0.2,
+  "failures": []
+ }
+}

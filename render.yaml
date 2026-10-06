@@ -1,0 +1,13 @@
+# Render blueprint: one free web service built from the Dockerfile. Model
+# keys are entered in the dashboard (sync: false), never committed.
+services:
+  - type: web
+    name: wakeel
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /api/health
+    envVars:
+      - { key: GEMINI_API_KEY, sync: false }
+      - { key: GROQ_API_KEY, sync: false }
+      - { key: REVIEWER_TOKEN, generateValue: true }

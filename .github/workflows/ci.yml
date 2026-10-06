@@ -1,0 +1,36 @@
+name: ci
+on: [push, pull_request]
+permissions: { contents: read, packages: write }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13", cache: pip }
+      - run: pip install -r requirements-dev.txt
+      - run: GEMINI_API_KEY= GROQ_API_KEY= python -m pytest -q
+      - name: Evaluations (rules mode, offline; fails on any unsafe outcome)
+        run: GEMINI_API_KEY= GROQ_API_KEY= python -m evals.run
+      - name: Evaluations with models (only when the free-tier keys are configured)
+        if: env.GEMINI_API_KEY != '' || env.GROQ_API_KEY != ''
+        run: python -m evals.run --model
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t wakeel .
+      - name: The container starts and answers
+        run: |
+          docker run -d -p 8000:8000 --name w wakeel
+          for i in $(seq 1 30); do curl -sf localhost:8000/api/health && break; sleep 1; done
+          curl -sf -X POST localhost:8000/api/cases -H 'content-type: application/json' \
+            -d '{"customer":"sara","message":"I was charged twice at Jarir Bookstore"}' | grep -q awaiting_approval
+      - if: github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker tag wakeel ghcr.io/zuhdiemara/wakeel:latest && docker push ghcr.io/zuhdiemara/wakeel:latest

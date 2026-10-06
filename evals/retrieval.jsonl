@@ -1,0 +1,30 @@
+{"q": "I was charged twice at the same shop", "lang": "en", "gold": ["disputes#3", "disputes#3.1"]}
+{"q": "the same purchase appears two times on my statement", "lang": "en", "gold": ["disputes#3", "disputes#3.1"]}
+{"q": "do I need a receipt for a double charge", "lang": "en", "gold": ["disputes#3.1"]}
+{"q": "how many days do I have to dispute a transaction", "lang": "en", "gold": ["disputes#2"]}
+{"q": "is it too late to complain about a payment from three months ago", "lang": "en", "gold": ["disputes#2"]}
+{"q": "my order never arrived what can I do", "lang": "en", "gold": ["disputes#4"]}
+{"q": "how long does a chargeback take", "lang": "en", "gold": ["disputes#4"]}
+{"q": "the shop charged me more than the price we agreed", "lang": "en", "gold": ["disputes#5"]}
+{"q": "there is a payment on my card I did not make", "lang": "en", "gold": ["disputes#6"]}
+{"q": "what is the maximum refund the assistant can propose", "lang": "en", "gold": ["disputes#7"]}
+{"q": "when will the refund reach my card", "lang": "en", "gold": ["disputes#7"]}
+{"q": "I cancelled my booking but was still charged", "lang": "en", "gold": ["disputes#8"]}
+{"q": "why is there an extra 2.5% line after shopping abroad", "lang": "en", "gold": ["fees#2"]}
+{"q": "how much does withdrawing cash with my credit card cost", "lang": "en", "gold": ["fees#3"]}
+{"q": "fee for paying my card bill late", "lang": "en", "gold": ["fees#4"]}
+{"q": "annual fee for the platinum card", "lang": "en", "gold": ["fees#1"]}
+{"q": "does the AI move money by itself", "lang": "en", "gold": ["privacy#2"]}
+{"q": "where is my data stored", "lang": "en", "gold": ["privacy#5"]}
+{"q": "can I ask you to delete my personal data", "lang": "en", "gold": ["privacy#4"]}
+{"q": "how long do you keep dispute records", "lang": "en", "gold": ["privacy#3"]}
+{"q": "خصم المبلغ مرتين من نفس المتجر", "lang": "ar", "gold": ["disputes.ar#3", "disputes.ar#3.1"]}
+{"q": "كم يوم عندي للاعتراض على عملية", "lang": "ar", "gold": ["disputes.ar#2"]}
+{"q": "الطلب لم يصل من المتجر الإلكتروني", "lang": "ar", "gold": ["disputes.ar#4"]}
+{"q": "عملية في بطاقتي لم أقم بها", "lang": "ar", "gold": ["disputes.ar#6"]}
+{"q": "متى يصل المبلغ المسترد", "lang": "ar", "gold": ["disputes.ar#7"]}
+{"q": "ألغيت الحجز ولكن تم الخصم", "lang": "ar", "gold": ["disputes.ar#8"]}
+{"q": "رسوم الشراء بالدولار", "lang": "ar", "gold": ["fees.ar#2"]}
+{"q": "كم رسوم السحب النقدي بالبطاقة الائتمانية", "lang": "ar", "gold": ["fees.ar#3"]}
+{"q": "هل يحول المساعد الذكي الأموال بنفسه", "lang": "ar", "gold": ["privacy.ar#2"]}
+{"q": "أين تحفظ بياناتي", "lang": "ar", "gold": ["privacy.ar#5"]}

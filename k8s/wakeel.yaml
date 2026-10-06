@@ -1,0 +1,48 @@
+# Wakeel on Kubernetes: two replicas behind a Service, health probes,
+# autoscaling on CPU, and model keys from a Secret (never in the image).
+#   kubectl create secret generic wakeel-keys --from-literal=GEMINI_API_KEY=... --from-literal=GROQ_API_KEY=...
+#   kubectl apply -f k8s/wakeel.yaml
+#
+# Note: cases awaiting approval live in the in-process checkpointer. With more
+# than one replica, use a shared checkpointer (langgraph-checkpoint-postgres)
+# or sticky sessions; see the README, "From demo to production".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wakeel
+  labels: { app: wakeel }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: wakeel } }
+  template:
+    metadata:
+      labels: { app: wakeel }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001 }
+      containers:
+        - name: wakeel
+          image: ghcr.io/zuhdiemara/wakeel:latest
+          ports: [{ containerPort: 8000 }]
+          envFrom: [{ secretRef: { name: wakeel-keys, optional: true } }]
+          readinessProbe: { httpGet: { path: /api/health, port: 8000 }, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /api/health, port: 8000 }, initialDelaySeconds: 20, periodSeconds: 20 }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: false, capabilities: { drop: [ALL] } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: wakeel }
+spec:
+  selector: { app: wakeel }
+  ports: [{ port: 80, targetPort: 8000 }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: wakeel }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: wakeel }
+  minReplicas: 2
+  maxReplicas: 6
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }]
