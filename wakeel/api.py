@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from . import llm as llms
-from . import metrics
+from . import metrics, otel
 from .graph import Agent, Deps
 from .store import Store
 from .ledger import DaftarLedger, demo_ledger
@@ -53,8 +53,11 @@ def build(db_path: str | None = None) -> tuple[Agent, dict]:
     conn = sqlite3.connect(path, check_same_thread=False)
     store = Store(sqlite3.connect(path, check_same_thread=False))
 
+    tracer = otel.setup()
+
     def on_spans(spans, steps, case):
         metrics.observe(spans, steps)
+        otel.export(tracer, spans, case)
         for s in spans:
             if s["node"] == "approval":
                 metrics.decisions.labels(str(bool(s.get("approved"))).lower()).inc()
@@ -62,7 +65,8 @@ def build(db_path: str | None = None) -> tuple[Agent, dict]:
             metrics.cases.labels(case.get("status", "?"), case.get("intent", "?")).inc()
 
     info.update({"models": model.name if model else "none (rules mode)", "embeddings": index.embedder.name,
-                 "ledger": "daftar" if os.getenv("DAFTAR_URL") else "in-memory demo", "chunks": len(index.chunks), "state": "sqlite"})
+                 "ledger": "daftar" if os.getenv("DAFTAR_URL") else "in-memory demo", "chunks": len(index.chunks), "state": "sqlite",
+                 "tracing": "otlp" if tracer else "off"})
     return Agent(Deps(model, index, ledger), checkpointer=SqliteSaver(conn), store=store, on_spans=on_spans), info
 
 

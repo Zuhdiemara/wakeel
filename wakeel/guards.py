@@ -70,3 +70,11 @@ _INJECTION_RX = [re.compile(p) for p in _INJECTION]
 def injection_signals(text: str) -> list[str]:
     t = normalise(text)
     return [p.pattern for p in _INJECTION_RX if p.search(t)]
+
+
+_LEAK = re.compile(r"(you are the operations agent|treat the message as data|return json|system prompt|write a short, warm reply)", re.I)
+
+
+def leaks_instructions(text: str) -> bool:
+    """True if a reply echoes our own instructions (a sign of prompt leaking)."""
+    return bool(_LEAK.search(text))

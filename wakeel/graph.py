@@ -73,7 +73,8 @@ class Deps:
 
 
 def _span(node: str, t0: float, rep: Reply | None = None, **extra) -> dict:
-    s = {"node": node, "ms": int((time.monotonic() - t0) * 1000), **extra}
+    ms = int((time.monotonic() - t0) * 1000)
+    s = {"node": node, "ms": ms, "start": round(time.time() - ms / 1000, 3), **extra}
     if rep is not None:
         s.update(provider=rep.provider, model=rep.model, tokens_in=rep.tokens_in, tokens_out=rep.tokens_out, llm_ms=rep.ms)
     return s
@@ -274,6 +275,8 @@ def make_graph(deps: Deps, checkpointer=None):
              "language (Arabic if lang is ar). State amounts exactly as given. Cite the policy section in brackets. No promises beyond the facts."},
             {"role": "user", "content": json.dumps({"lang": s["lang"], "facts": facts}, ensure_ascii=False)}])
         reply, checked = (rep.text.strip() if rep else ""), False
+        if reply and (guards.redact(reply)[1] or guards.leaks_instructions(reply)):
+            reply = ""                                               # output guard: no personal data, no prompt leaks
         if reply:
             allowed = set(re.findall(r"\d+(?:[.,]\d+)?", json.dumps(facts, ensure_ascii=False))) | {"3", "60", "5,000", "5000"}
             stated = set(re.findall(r"\d+(?:[.,]\d+)?", guards.normalise_digits(reply)))

@@ -50,12 +50,13 @@ flowchart LR
 | **Orchestration** | A LangGraph `StateGraph` with a checkpointer. The model classifies the request, but **code decides the order of steps**, so approval can never be skipped. A human approval is a LangGraph `interrupt`, resumed with `Command(resume=…)`. |
 | **Multi-agent** | Supervisor pattern: a policy agent (retrieval and grounded answers) and an operations agent (tools). Each worker returns to the supervisor. |
 | **RAG** | **Chunking:** heading-aware, with stable section ids for citations. **Search:** BM25 (Arabic-normalised: diacritics, alef forms, taa marbuta, the definite article) plus dense vectors (Gemini embeddings, or an offline n-gram hasher), fused with reciprocal rank fusion. **Reranking:** by the model, falling back to the fused order. |
+| **Output guard** | The final reply is scanned: any personal data (card, ID, IBAN, phone) or echo of the system prompt and the reply is replaced by the template. |
 | **Hallucination control** | **Citations:** any section id that wasn't retrieved is dropped. **Numbers:** every number in the final reply must appear in the facts, otherwise a template is used. **Calculations:** done in code, never by the model (duplicates, the 60-day window, caps, refundable amounts). |
 | **Tool safety** | **Customer:** fixed by the session; no tool takes a customer id. **Refunds:** the agent can only *propose* one. **Rules:** caps and windows are enforced in code. **Execution:** refunds carry an idempotency key, so retries and double clicks never pay twice. |
 | **Prompt injection** | **Screen:** a pattern screen (English and Arabic) sends suspicious messages to a person. **Structure:** even a fully hijacked model cannot reach another customer or move money (a test plays exactly that). |
 | **PII / PDPL** | Card numbers (Luhn-checked; the last four kept), Saudi ID and Iqama numbers, IBANs, phone numbers and emails are masked **before** any model or log sees them. Only the masked text is stored. |
 | **Models** | One interface, with adapters for Gemini, Groq (OpenAI-compatible, so OpenAI too) and Claude, in plain HTTP. **Fallback:** rate limits and outages move to the next provider; a bad request does not. **Degradation:** if every provider is down, each node falls back to deterministic rules and cases still progress. |
-| **Observability** | Every step records its node, latency, provider, model, tokens, tool calls, retrieved and cited ids, and fallbacks. The demo page shows the trace for each case. |
+| **Observability** | Every step records its node, latency, provider, model, tokens, tool calls, retrieved and cited ids, and fallbacks. The demo page shows the trace for each case. **OpenTelemetry:** with `OTEL_EXPORTER_OTLP_ENDPOINT` set, every case is exported as a trace (one span per step, with `gen_ai.*` attributes from the GenAI semantic conventions) to Langfuse, Grafana, Jaeger or Datadog, carrying ids and masked text only. |
 | **Durable state** | **Checkpoints:** LangGraph checkpoints in SQLite, so a case awaiting approval survives a restart and a new process can resume it (tested). **Index:** a case index feeds the reviewer queue (`GET /api/cases?status=awaiting_approval`). |
 | **Audit trail** | Every opening, proposal, decision and refund is written to an append-only, hash-chained log (database triggers block edits). `GET /api/audit/verify` recomputes the chain and names the first broken entry; a test edits one and catches it. |
 | **Streaming** | `POST /api/cases/stream` sends each graph step as a server-sent event as it finishes, so the page shows the agent working live. |
@@ -90,6 +91,8 @@ Hybrid did **not** beat vectors alone at rank 1 with the offline embedder. I kep
 **What the tools caught while building it:**
 - **The evaluation:** it found that the rules fallback proposed the Jarir duplicate whatever merchant the customer named (Starbucks, Nahdi, even a cancellation): 3 wrong proposals. Fixed by matching the merchant the customer named (English or Arabic); a regression test keeps it fixed.
 - **The integration test against Daftar:** it hit Daftar's rate limit, because the ledger adapter made one API call per transaction (N+1). Fixed by caching captured transfers (they never change) and honouring `Retry-After`.
+
+**Choosing a model, measured:** `python -m evals.compare` runs the same cases and attacks on each configured provider on its own, and reports intent and decision accuracy, wrong refunds, unsafe outcomes, p50 and p95 latency, tokens per case, and how often each fell back to rules. Model choice is a measured trade-off, made per task.
 
 ## Run it
 
