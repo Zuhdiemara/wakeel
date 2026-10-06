@@ -26,7 +26,7 @@ jobs:
       - run: docker build -t wakeel .
       - name: The container starts and answers
         run: |
-          docker run -d -p 8000:8000 --name w wakeel
+          docker run -d -p 8000:8000 --name wakeel-smoke wakeel
           for i in $(seq 1 30); do curl -sf localhost:8000/api/health && break; sleep 1; done
           curl -sf -X POST localhost:8000/api/cases -H 'content-type: application/json' \
             -d '{"customer":"sara","message":"I was charged twice at Jarir Bookstore"}' | grep -q awaiting_approval
