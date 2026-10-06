@@ -13,6 +13,8 @@ jobs:
         with: { python-version: "3.13", cache: pip }
       - run: pip install -r requirements-dev.txt
       - run: GEMINI_API_KEY= GROQ_API_KEY= python -m pytest -q
+      - name: The graph diagram in docs matches the code
+        run: python scripts/graph_doc.py && git diff --exit-code docs/graph.md
       - name: Evaluations (rules mode, offline; fails on any unsafe outcome)
         run: GEMINI_API_KEY= GROQ_API_KEY= python -m evals.run
       - name: Evaluations with models (only when the free-tier keys are configured)

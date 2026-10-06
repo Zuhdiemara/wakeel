@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import operator
 import re
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -357,6 +358,14 @@ class Agent:
     def __init__(self, deps: Deps, checkpointer=None, store=None, on_spans=None):
         self.deps, self.store, self.on_spans = deps, store, on_spans
         self.graph = make_graph(deps, checkpointer)
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+
+    def _lock(self, case_id: str) -> threading.Lock:
+        """One decision at a time per case in this process. Across processes
+        the ledger's idempotency key is the backstop: a second resume replays."""
+        with self._locks_guard:
+            return self._locks.setdefault(case_id, threading.Lock())
 
     def _cfg(self, case_id: str) -> dict:
         return {"configurable": {"thread_id": case_id}}
@@ -408,6 +417,10 @@ class Agent:
         yield {"type": "case", "case": c}
 
     def decide(self, case_id: str, approved: bool, reviewer: str, note: str = "") -> dict:
+        with self._lock(case_id):
+            return self._decide(case_id, approved, reviewer, note)
+
+    def _decide(self, case_id: str, approved: bool, reviewer: str, note: str) -> dict:
         snap = self.graph.get_state(self._cfg(case_id))
         if "approval" not in snap.next:           # already decided (a double click), or not awaiting approval
             return self.get(case_id)
@@ -419,6 +432,10 @@ class Agent:
 
     def reply(self, case_id: str, message: str) -> dict:
         """The customer answers a clarifying question."""
+        with self._lock(case_id):
+            return self._reply(case_id, message)
+
+    def _reply(self, case_id: str, message: str) -> dict:
         snap = self.graph.get_state(self._cfg(case_id))
         if "clarify" not in snap.next:
             return self.get(case_id)

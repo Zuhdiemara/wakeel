@@ -25,6 +25,8 @@ customer: "I was charged twice at Jarir Bookstore, card 4111 1111 1111 1111"
 
 ## Architecture
 
+The exact graph, generated from the compiled code: [docs/graph.md](docs/graph.md).
+
 ```mermaid
 flowchart LR
   C[Customer, Arabic or English] --> I[intake<br/>PII masking · language · injection screen]
@@ -54,6 +56,7 @@ flowchart LR
 | **Output guard** | The final reply is scanned: any personal data (card, ID, IBAN, phone) or echo of the system prompt and the reply is replaced by the template. |
 | **Hallucination control** | **Citations:** any section id that wasn't retrieved is dropped. **Numbers:** every number in the final reply must appear in the facts, otherwise a template is used. **Calculations:** done in code, never by the model (duplicates, the 60-day window, caps, refundable amounts). |
 | **Tool safety** | **Customer:** fixed by the session; no tool takes a customer id. **Refunds:** the agent can only *propose* one. **Rules:** caps and windows are enforced in code. **Execution:** refunds carry an idempotency key, so retries and double clicks never pay twice. |
+| **Concurrency** | Ten reviewers approving the same case at once pay once, and every one sees the final state (a per-case lock, with the ledger's idempotency key as the backstop across servers). Fifty customers filing about the same duplicate at once lead to exactly one refund. Both tested. |
 | **Cost control** | At most 8 tool steps and a per-case token budget; past it, the loop stops and rules finish the case (tested with a model that never stops). 10 cases a minute per address. |
 | **Prompt injection** | **Screen:** a pattern screen (English and Arabic) sends suspicious messages to a person. **Structure:** even a fully hijacked model cannot reach another customer or move money (a test plays exactly that). |
 | **PII / PDPL** | Card numbers (Luhn-checked; the last four kept), Saudi ID and Iqama numbers, IBANs, phone numbers and emails are masked **before** any model or log sees them. Only the masked text is stored. |
