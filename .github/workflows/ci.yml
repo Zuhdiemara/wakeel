@@ -36,3 +36,44 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           docker tag wakeel ghcr.io/zuhdiemara/wakeel:latest && docker push ghcr.io/zuhdiemara/wakeel:latest
+
+  # The image on a real Kubernetes cluster (kind), deployed with k8s/wakeel.yaml,
+  # with its OpenTelemetry traces exported to a real Jaeger.
+  kubernetes:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1
+        with: { cluster_name: wakeel }
+      - name: Build the image and load it into the cluster
+        run: |
+          docker build -t wakeel:ci .
+          kind load docker-image wakeel:ci --name wakeel
+      - name: Jaeger in the cluster (OTLP on 4318, API on 16686)
+        run: |
+          kubectl create deployment jaeger --image=jaegertracing/jaeger:latest --port=4318
+          kubectl expose deployment jaeger --name=jaeger --port=4318 --target-port=4318
+          kubectl expose deployment jaeger --name=jaeger-query --port=16686 --target-port=16686
+          kubectl rollout status deployment/jaeger --timeout=180s
+      - name: Deploy Wakeel with the manifests
+        run: |
+          kubectl create secret generic wakeel-keys --from-literal=OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+          sed 's#image: ghcr.io/zuhdiemara/wakeel:latest#image: wakeel:ci\n          imagePullPolicy: Never#' k8s/wakeel.yaml | kubectl apply -f -
+          kubectl rollout status deployment/wakeel --timeout=180s
+          kubectl get pods -o wide
+      - name: A case through the Service, then its trace in Jaeger
+        run: |
+          kubectl port-forward service/wakeel 8000:80 > /dev/null 2>&1 &
+          kubectl port-forward service/jaeger-query 16686:16686 > /dev/null 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8000/api/health && break; sleep 1; done
+          curl -sf -X POST localhost:8000/api/cases -H 'content-type: application/json' \
+            -d '{"customer":"sara","message":"I was charged twice at Jarir Bookstore"}' | grep -q awaiting_approval
+          curl -sf localhost:8000/metrics | grep -q wakeel_node_seconds_bucket
+          for i in $(seq 1 30); do
+            n=$(curl -sf "localhost:16686/api/traces?service=wakeel&limit=5" | python3 -c "import json,sys; d=json.load(sys.stdin)['data']; print(sum(len(t['spans']) for t in d))" || echo 0)
+            [ "${n:-0}" -ge 5 ] && echo "Jaeger has $n spans from Wakeel" && exit 0
+            sleep 2
+          done
+          echo "no trace reached Jaeger"; kubectl logs deployment/wakeel --tail=50; exit 1
