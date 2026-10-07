@@ -71,13 +71,16 @@ jobs:
           curl -sf -X POST localhost:8000/api/cases -H 'content-type: application/json' \
             -d '{"customer":"sara","message":"I was charged twice at Jarir Bookstore"}' | grep -q awaiting_approval
           curl -sf localhost:8000/metrics | grep -q wakeel_node_seconds_bucket
+          # Jaeger v2's query API (v3): the service appears once spans arrive;
+          # then count the spans of its recent traces (OTLP JSON).
           for i in $(seq 1 30); do
-            body=$(curl -s "localhost:16686/api/traces?service=wakeel&limit=5" || true)
-            n=$(printf '%s' "$body" | python3 -c "import json,sys; d=json.load(sys.stdin).get('data') or []; print(sum(len(t['spans']) for t in d))" 2>/dev/null || echo 0)
-            [ "${n:-0}" -ge 5 ] && echo "Jaeger has $n spans from Wakeel" && exit 0
+            start=$(date -u -d '-10 min' +%Y-%m-%dT%H:%M:%SZ); end=$(date -u -d '+1 min' +%Y-%m-%dT%H:%M:%SZ)
+            body=$(curl -s "localhost:16686/api/v3/traces?query.service_name=wakeel&query.start_time_min=$start&query.start_time_max=$end" || true)
+            n=$(printf '%s' "$body" | python3 -c "import json,sys; d=json.load(sys.stdin); r=d.get('result',d); print(sum(len(s.get('spans',[])) for rs in r.get('resourceSpans',[]) for s in rs.get('scopeSpans',[])))" 2>/dev/null || echo 0)
+            [ "${n:-0}" -ge 5 ] && echo "Jaeger has $n spans from Wakeel" && curl -s localhost:16686/api/v3/services && exit 0
             sleep 2
           done
           echo "--- Jaeger answered:"; printf '%s' "$body" | head -c 400; echo
-          echo "--- services:"; curl -s localhost:16686/api/services | head -c 300; echo
+          echo "--- services:"; curl -s localhost:16686/api/v3/services | head -c 300; echo
           kubectl logs deployment/jaeger --tail=30
           echo "no trace reached Jaeger"; kubectl logs deployment/wakeel --tail=50; exit 1
