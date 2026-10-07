@@ -78,6 +78,12 @@ class Gemini:
     def __init__(self, key: str, model: str = "gemini-2.5-flash"):
         self.key, self.model, self.name = key, model, "gemini"
 
+    def url(self) -> str:
+        return f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+
+    def headers(self) -> dict:
+        return {"x-goog-api-key": self.key}
+
     def chat(self, messages, tools=None, json_mode=False) -> Reply:
         system = "\n".join(m["content"] for m in messages if m["role"] == "system")
         contents = []
@@ -98,8 +104,7 @@ class Gemini:
         if json_mode:
             body["generationConfig"]["responseMimeType"] = "application/json"
         t0 = time.monotonic()
-        d = _post(f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
-                  {"x-goog-api-key": self.key}, body)
+        d = _post(self.url(), self.headers(), body)
         parts = (d.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         rep = Reply(provider=self.name, model=self.model, ms=int((time.monotonic() - t0) * 1000))
         for i, p in enumerate(parts):
@@ -121,6 +126,11 @@ class OpenAICompatible:
         self.key, self.model, self.base, self.name, self.supports_tools = key, model, base.rstrip("/"), name, supports_tools
 
     def chat(self, messages, tools=None, json_mode=False) -> Reply:
+        t0 = time.monotonic()
+        d = _post(f"{self.base}/chat/completions", {"Authorization": f"Bearer {self.key}"}, self.body(messages, tools, json_mode))
+        return self.parse(d, t0)
+
+    def body(self, messages, tools=None, json_mode=False) -> dict:
         wire = []
         for m in messages:
             if m["role"] == "assistant" and m.get("tool_calls"):
@@ -137,8 +147,9 @@ class OpenAICompatible:
             body["tools"] = [{"type": "function", "function": t} for t in tools]
         if json_mode:
             body["response_format"] = {"type": "json_object"}
-        t0 = time.monotonic()
-        d = _post(f"{self.base}/chat/completions", {"Authorization": f"Bearer {self.key}"}, body)
+        return body
+
+    def parse(self, d: dict, t0: float) -> Reply:
         msg = d["choices"][0]["message"]
         rep = Reply(text=msg.get("content") or "", provider=self.name, model=self.model, ms=int((time.monotonic() - t0) * 1000))
         for c in msg.get("tool_calls") or []:
@@ -160,7 +171,7 @@ class Claude:
     def __init__(self, key: str, model: str = "claude-haiku-4-5-20251001"):
         self.key, self.model, self.name = key, model, "claude"
 
-    def chat(self, messages, tools=None, json_mode=False) -> Reply:
+    def body(self, messages, tools=None, json_mode=False) -> dict:
         system = "\n".join(m["content"] for m in messages if m["role"] == "system")
         if json_mode:
             system += "\nRespond with one JSON object only."
@@ -178,11 +189,18 @@ class Claude:
                     wire[-1]["content"].append(block)
                 else:
                     wire.append({"role": "user", "content": [block]})
-        body: dict[str, Any] = {"model": self.model, "max_tokens": 1500, "system": system, "messages": wire, "temperature": 0.1}
+        # No temperature: the current Messages API and SDK no longer accept it.
+        body: dict[str, Any] = {"model": self.model, "max_tokens": 1500, "system": system, "messages": wire}
         if tools:
             body["tools"] = [{"name": t["name"], "description": t["description"], "input_schema": t["parameters"]} for t in tools]
+        return body
+
+    def chat(self, messages, tools=None, json_mode=False) -> Reply:
         t0 = time.monotonic()
-        d = _post("https://api.anthropic.com/v1/messages", {"x-api-key": self.key, "anthropic-version": "2023-06-01"}, body)
+        d = _post("https://api.anthropic.com/v1/messages", {"x-api-key": self.key, "anthropic-version": "2023-06-01"}, self.body(messages, tools, json_mode))
+        return self.parse(d, t0)
+
+    def parse(self, d: dict, t0: float) -> Reply:
         rep = Reply(provider=self.name, model=self.model, ms=int((time.monotonic() - t0) * 1000))
         for b in d.get("content", []):
             if b["type"] == "text":
@@ -192,6 +210,37 @@ class Claude:
         u = d.get("usage", {})
         rep.tokens_in, rep.tokens_out = u.get("input_tokens", 0), u.get("output_tokens", 0)
         return rep
+
+
+# ---------------------------------------------------------------- Vertex AI
+
+class VertexGemini(Gemini):
+    """The same Gemini request through Vertex AI: a Google Cloud project and
+    region (data residency, enterprise identity and quotas) and an OAuth
+    token instead of an API key. The token comes from VERTEX_ACCESS_TOKEN
+    (e.g. `gcloud auth print-access-token`) or Application Default
+    Credentials when google-auth is installed."""
+
+    def __init__(self, project: str, region: str, model: str = "gemini-2.5-flash", token: str | None = None):
+        super().__init__("", model)
+        self.project, self.region, self.token, self.name = project, region, token, "vertex"
+
+    def url(self) -> str:
+        return (f"https://{self.region}-aiplatform.googleapis.com/v1/projects/{self.project}/locations/{self.region}"
+                f"/publishers/google/models/{self.model}:generateContent")
+
+    def headers(self) -> dict:
+        token = self.token or os.getenv("VERTEX_ACCESS_TOKEN")
+        if not token:
+            try:
+                import google.auth
+                import google.auth.transport.requests
+                creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                creds.refresh(google.auth.transport.requests.Request())
+                token = creds.token
+            except Exception as e:
+                raise LLMError(f"no Vertex credentials: {e}", retryable=False) from e
+        return {"Authorization": f"Bearer {token}"}
 
 
 # ---------------------------------------------------------------- fallback
@@ -258,12 +307,21 @@ def build(spec: str):
     vendor, model = spec.split(":", 1)
     vendor = vendor.strip().lower()
     key = {"gemini": "GEMINI_API_KEY", "groq": "GROQ_API_KEY", "claude": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY",
-           "cerebras": "CEREBRAS_API_KEY", "openrouter": "OPENROUTER_API_KEY", "mistral": "MISTRAL_API_KEY", "github": "GITHUB_MODELS_TOKEN"}.get(vendor)
+           "cerebras": "CEREBRAS_API_KEY", "openrouter": "OPENROUTER_API_KEY", "mistral": "MISTRAL_API_KEY", "github": "GITHUB_MODELS_TOKEN",
+           "openai-sdk": "OPENAI_SDK_KEY", "claude-sdk": "ANTHROPIC_API_KEY"}.get(vendor)
+    if vendor == "vertex":
+        return VertexGemini(os.environ["VERTEX_PROJECT"], os.getenv("VERTEX_REGION", "us-central1"), model) if os.getenv("VERTEX_PROJECT") else None
     if key is None or not os.getenv(key):
         return None
     k = os.environ[key]
     if vendor == "gemini":
         return Gemini(k, model)
+    if vendor == "openai-sdk":
+        from .sdk import OpenAISDK
+        return OpenAISDK(k, model, os.getenv("OPENAI_SDK_BASE_URL"))
+    if vendor == "claude-sdk":
+        from .sdk import ClaudeSDK
+        return ClaudeSDK(k, model)
     if vendor == "claude":
         return Claude(k, model)
     base = {"groq": "https://api.groq.com/openai/v1", "openai": "https://api.openai.com/v1", "cerebras": "https://api.cerebras.ai/v1",
