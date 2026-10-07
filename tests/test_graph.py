@@ -58,24 +58,18 @@ def test_injection_screen_skips_the_model(make_agent):
     assert c["status"] == "handed_off" and c["injection"]
 
 
-def test_fallback_moves_to_the_next_provider_only_for_retryable_errors():
+def test_fallback_moves_on_for_any_provider_error():
     switched = []
 
     def down(*_):
         raise LLMError("HTTP 429: quota")
 
-    def broken(*_):
-        raise LLMError("HTTP 400: bad request", retryable=False)
+    def unsupported(*_):
+        raise LLMError("HTTP 400: json mode is not supported by this model", retryable=False)
 
     ok = Scripted(lambda *_: Reply(text="hello"), "groq")
-    f = Fallback([Scripted(down, "gemini"), ok], on_switch=lambda p, e: switched.append(p))
-    assert f.chat([{"role": "user", "content": "hi"}]).provider == "groq" and switched == ["gemini"]
-    f2 = Fallback([Scripted(broken, "gemini"), ok])
-    try:
-        f2.chat([{"role": "user", "content": "hi"}])
-        raise AssertionError("a 400 should not fall through")
-    except LLMError:
-        pass
+    f = Fallback([Scripted(down, "gemini"), Scripted(unsupported, "allam"), ok], on_switch=lambda p, e: switched.append(p))
+    assert f.chat([{"role": "user", "content": "hi"}]).provider == "groq" and switched == ["gemini", "allam"]
 
 
 def test_every_model_failure_degrades_to_rules(make_agent):

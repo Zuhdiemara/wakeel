@@ -49,7 +49,8 @@ def run(provider, index: Index, cases: list[dict], attacks: list[dict]) -> dict:
             "p50_seconds": round(statistics.median(lat), 2), "p95_seconds": round(sorted(lat)[int(0.95 * (len(lat) - 1))], 2),
             "tokens_per_case": round(statistics.mean(toks)), "fell_back_to_rules": rules_steps, "model_steps": model_steps,
             "model_errors": len(errors), "first_errors": sorted(set(errors))[:3],
-            "valid": model_steps > 0 and len(errors) < model_steps}   # otherwise the row measured the rules, not the model
+            # Valid only if the model really did the work: at most 10% of its calls failed.
+            "valid": model_steps > 0 and len(errors) <= 0.1 * (model_steps + len(errors))}
 
 
 def main():
@@ -61,7 +62,12 @@ def main():
     load = lambda f: [json.loads(l) for l in (HERE / f).read_text(encoding="utf-8").splitlines() if l.strip()]
     cases, attacks = load("agent.jsonl"), load("injection.jsonl")
     index = Index(load_corpus(HERE.parent / "corpus"), embedder_from_env())
-    rows = [run(p, index, cases, attacks) for p in providers()]
+    rows = []
+    for p in providers():
+        if not getattr(p, "supports_tools", True):
+            print(f"{p.name}:{p.model} is chat only (no tool calling): it writes replies inside the chain, so it is not run alone.")
+            continue
+        rows.append(run(p, index, cases, attacks))
     (HERE / "compare.json").write_text(json.dumps(rows, indent=1))
     cols = ["provider", "model", "valid", "intent_accuracy", "decision_accuracy", "wrong_refunds", "unsafe_from_attacks", "p50_seconds", "p95_seconds", "tokens_per_case", "model_steps", "model_errors", "fell_back_to_rules"]
     print(" | ".join(cols))

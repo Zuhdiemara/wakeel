@@ -97,16 +97,25 @@ Hybrid did **not** beat vectors alone at rank 1 with the offline embedder. I kep
 | Attacks sent to a person by the screen | 8 / 12 |
 | Unsafe outcomes from attacks (wrong refund, or money moved without approval) | **0** of 12 |
 
-**With real models** (`python -m evals.compare`, free tiers, 7 October 2026). Each provider runs alone on the 16 cases and 12 attacks:
+**With real models** (`python -m evals.compare`, free tiers, 7–8 October 2026). Each model runs alone on the 16 cases and 12 attacks. A row counts only if the model really did the work: at most 10% of its calls failed.
 
-| Provider | Model | Really used the model? | Decisions | Wrong refunds | Unsafe outcomes | p50 / p95 | Tokens per case |
+| Model | Vendor | Valid? | Decisions | Wrong refunds | Unsafe outcomes | p50 / p95 | Tokens per case |
 |---|---|---|---|---|---|---|---|
-| Groq | openai/gpt-oss-120b | yes (75 model steps; 6 rate-limit errors finished by rules) | 16/16 | 0 | 0 | 14.3 s / 40.7 s | 1,836 |
-| Gemini | gemini-2.5-flash | **no**: the free daily quota was used up (59 errors), so the row is marked invalid | n/a | n/a | n/a | n/a | n/a |
+| gpt-oss-120b | Groq | yes (82 model steps, 1 error) | 16/16 | 0 | 0 | 15.1 s / 33.3 s | 2,189 |
+| gpt-oss-20b | Groq | yes (89 steps, 4 errors) | 16/16 | 0 | 0 | 8.9 s / 50.4 s | 2,510 |
+| gemini-3.5-flash-lite | Google | no: 31 errors in 69 calls (free quota) | n/a | n/a | n/a | n/a | n/a |
+| gemini-3.1-flash-lite | Google | no: quota | n/a | n/a | n/a | n/a | n/a |
+| gemma-4-26b | Google | no: quota and a network drop | n/a | n/a | n/a | n/a | n/a |
+| gemini-2.5-flash | Google | no: daily quota used up | n/a | n/a | n/a | n/a | n/a |
+| allam-2-7b | Groq (SDAIA) | chat only: writes replies inside the chain | n/a | n/a | n/a | n/a | n/a |
 
-The latency is mostly free-tier rate limiting (the adapter waits out short 429s), not the model itself. The Gemini row is re-run when its quota resets. The harness refuses to pass off a rules-only run as a model result.
+**Reading the table:**
+- The Gemini rows were measured after earlier runs had used most of their free daily quota; they are re-run on a fresh quota.
+- Latency is mostly free-tier rate limiting, not the models.
+- Whatever the model, wrong refunds and unsafe outcomes stay at 0, because the safety is structural.
 
 **What the tools caught while building it:**
+- **Seven models in one chain:** ALLaM rejected JSON mode with HTTP 400, and the chain treated any 400 as final, stopping instead of trying the next model. With mixed models a 400 usually means "not supported here", so the chain now moves on (tested).
 - **Real models:** with Gemini, the free quota ran out after the first tool call, and the case ended "no refund" for a genuine duplicate. Model errors had been swallowed, so the first comparison silently measured rules. Now every model error is recorded on its step, the comparison marks rows that didn't really use the model, and a failure in the middle of an investigation is finished by rules (tested). The Groq model had also been retired (HTTP 404), so the default moved to `openai/gpt-oss-120b`.
 - **The evaluation:** it found that the rules fallback proposed the Jarir duplicate whatever merchant the customer named (Starbucks, Nahdi, even a cancellation): 3 wrong proposals. Fixed by matching the merchant the customer named (English or Arabic); a regression test keeps it fixed.
 - **The integration test against Daftar:** it hit Daftar's rate limit, because the ledger adapter made one API call per transaction (N+1). Fixed by caching captured transfers (they never change) and honouring `Retry-After`.

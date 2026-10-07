@@ -197,9 +197,9 @@ class Claude:
 # ---------------------------------------------------------------- fallback
 
 class Fallback:
-    """Tries providers in order. A rate limit, outage or timeout moves on to
-    the next one; a malformed request (4xx) does not, since it would fail
-    everywhere. on_switch is called so the trace shows every fallback."""
+    """Tries providers in order; any failure (rate limit, outage, timeout, or an
+    option this model does not support) moves on to the next. on_switch is
+    called so the trace shows every fallback."""
 
     def __init__(self, providers: list, on_switch: Callable[[str, str], None] | None = None):
         if not providers:
@@ -218,8 +218,9 @@ class Fallback:
                 last = e
                 if self.on_switch:
                     self.on_switch(p.name, str(e))
-                if not e.retryable:
-                    break
+                # Even a 4xx moves on: with mixed models it usually means "this
+                # model does not support that option" (JSON mode, tools), and
+                # the next model may accept the same request.
         raise last or LLMError("no provider answered")
 
 
