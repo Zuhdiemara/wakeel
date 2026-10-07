@@ -259,7 +259,11 @@ def make_graph(deps: Deps, checkpointer=None):
             if tools.question:
                 break
         rules = not used_model or ((over_budget or model_failed) and not tools.proposal and not tools.question)
-        if rules and s["intent"] == "duplicate_charge":   # rules: the same procedure, without a model
+        # Cross-check: the model finished with no proposal and no question.
+        # If the rules find a qualifying duplicate for the merchant named, raise
+        # it for the reviewer, marked as the rules' finding (they still approve).
+        cross_check = used_model and not rules and not tools.proposal and not tools.question and s["intent"] == "duplicate_charge"
+        if (rules or cross_check) and s["intent"] == "duplicate_charge":   # rules: the same procedure, without a model
             dup = json.loads(tools.call("find_duplicates", {}))
             steps.append({"tool": "find_duplicates", "args": {}, "result": dup})
             named = [g for g in dup["groups"] if _mentions(s["text"], g["merchant"])]
@@ -276,10 +280,14 @@ def make_graph(deps: Deps, checkpointer=None):
                     args = {"transaction_id": g["duplicates"][0], "amount_sar": g["amount_sar"], "reason": "duplicate_charge", "policy_section": "disputes#3"}
                     steps.append({"tool": "propose_refund", "args": args, "result": json.loads(tools.call("propose_refund", args))})
                     break
-            summary = "rules: " + ("refund proposed" if tools.proposal else "no qualifying duplicate for the merchant named")
+            if rules:
+                summary = "rules: " + ("refund proposed" if tools.proposal else "no qualifying duplicate for the merchant named")
+        if cross_check and tools.proposal:
+            tools.proposal["source"] = "rules cross-check: the model proposed nothing"
         return {"ops": {"summary": summary, "steps": steps}, "proposal": tools.proposal, "question": tools.question,
                 "trace": spans + [_span("ops_agent", t0, steps=len(steps), proposed=bool(tools.proposal), tokens_spent=spent, over_budget=over_budget,
-                                         mode="rules" if rules else "model", model_failed=model_failed)]}
+                                         mode="rules" if rules else "model", model_failed=model_failed,
+                                         cross_check=bool(cross_check and tools.proposal))]}
 
     def clarify(s: State) -> dict:
         """Pauses until the customer answers; the answer is masked like any

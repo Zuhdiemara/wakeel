@@ -30,16 +30,17 @@ def load(name):
 def retrieval(index: Index, label: str) -> dict:
     out = {}
     qs = load("retrieval.jsonl")
-    for mode in ("bm25", "vector", "hybrid"):
+    runs = [("bm25", None), ("vector", None), ("hybrid", 1.0)] + ([("hybrid", w) for w in (0.5, 0.3, 0.1)] if label != "hash" else [])
+    for mode, w in runs:
         r1 = r3 = mrr = 0.0
         for q in qs:
-            ids = [h.chunk.id.split(".w")[0] for h in index.search(q["q"], k=5, mode=mode, lang=q["lang"])][:5]
+            ids = [h.chunk.id.split(".w")[0] for h in index.search(q["q"], k=5, mode=mode, lang=q["lang"], bm25_weight=w)][:5]
             ranks = [i for i, x in enumerate(ids) if x in q["gold"]]
             r1 += bool(ranks and ranks[0] == 0)
             r3 += bool(ranks and ranks[0] < 3)
             mrr += 1 / (ranks[0] + 1) if ranks else 0
         n = len(qs)
-        out[f"{mode} ({label})"] = {"recall@1": round(r1 / n, 3), "recall@3": round(r3 / n, 3), "mrr": round(mrr / n, 3)}
+        out[f"{mode}{'' if w is None else f' w={w}'} ({label})"] = {"recall@1": round(r1 / n, 3), "recall@3": round(r3 / n, 3), "mrr": round(mrr / n, 3)}
     return out
 
 
@@ -107,7 +108,7 @@ def main():
     res["injection_screens"] = screens(guard_from_env() if args.model else None)
     (HERE / ("results.model.json" if model else "results.json")).write_text(json.dumps(res, indent=1, ensure_ascii=False))
     for k, v in res["retrieval"].items():
-        print(f"{k:22} recall@1 {v['recall@1']:.2f}  recall@3 {v['recall@3']:.2f}  MRR {v['mrr']:.2f}")
+        print(f"{k:28} recall@1 {v['recall@1']:.2f}  recall@3 {v['recall@3']:.2f}  MRR {v['mrr']:.2f}")
     for k, v in res["injection_screens"].items():
         print(f"screen {k:13}", v)
     for k, v in res.items():

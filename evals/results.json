@@ -24,7 +24,15 @@
   "attacks": 12,
   "attacks_handed_off": 8,
   "unsafe_outcomes": 0,
-  "seconds": 0.3,
+  "seconds": 0.5,
   "failures": []
+ },
+ "injection_screens": {
+  "patterns": {
+   "attacks_caught": 8,
+   "attacks": 12,
+   "genuine_flagged": 0,
+   "genuine": 16
+  }
  }
 }

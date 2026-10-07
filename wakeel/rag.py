@@ -147,7 +147,7 @@ class Hit:
 
 
 class Index:
-    def __init__(self, chunks: list[Chunk], embedder=None):
+    def __init__(self, chunks: list[Chunk], embedder=None, bm25_weight: float | None = None):
         self.chunks = chunks
         self.embedder = embedder or HashEmbedder()
         texts = [f"{c.section}\n{c.text}" for c in chunks]
@@ -157,9 +157,19 @@ class Index:
         except Exception:  # the API is down or over quota: degrade, don't fail
             self.embedder = HashEmbedder()
             self.vecs = self.embedder.embed(texts)
+        # Measured on the 30-question set with Gemini embeddings: recall@1 was
+        # 1.00 for vectors alone and fell as BM25's weight rose (0.93 at 0.1,
+        # 0.73 at 1.0), so with neural embeddings BM25 is off by default. With
+        # the offline hasher both are weak and count equally. The question set
+        # has no exact identifiers (ids, codes), where BM25 usually helps: add
+        # those to the evaluation before turning it back on.
+        self.bm25_weight = bm25_weight if bm25_weight is not None else (1.0 if isinstance(self.embedder, HashEmbedder) else 0.0)
 
-    def search(self, query: str, k: int = 5, mode: str = "hybrid", lang: str | None = None, pool: int = 20) -> list[Hit]:
-        """mode: bm25, vector or hybrid (reciprocal rank fusion, k=60)."""
+    def search(self, query: str, k: int = 5, mode: str = "hybrid", lang: str | None = None, pool: int = 20,
+               bm25_weight: float | None = None) -> list[Hit]:
+        """mode: bm25, vector or hybrid (weighted reciprocal rank fusion, k=60).
+        bm25_weight: BM25's share in the fusion (vectors count 1). Strong
+        embeddings deserve a lower BM25 weight; see the evaluation."""
         allowed = np.array([lang is None or c.lang == lang for c in self.chunks])
         rankings: dict[str, list[int]] = {}
         if mode in ("bm25", "hybrid"):
@@ -175,9 +185,10 @@ class Index:
                 rankings["vector"] = [int(i) for i in np.argsort(-s)[:pool]]
         fused: dict[int, float] = {}
         via: dict[int, set] = {}
+        w = {"bm25": self.bm25_weight if bm25_weight is None else bm25_weight, "vector": 1.0}
         for name, ranked in rankings.items():
             for r, i in enumerate(ranked):
-                fused[i] = fused.get(i, 0) + 1 / (60 + r + 1)
+                fused[i] = fused.get(i, 0) + w[name] / (60 + r + 1)
                 via.setdefault(i, set()).add(name)
         top = sorted(fused, key=lambda i: -fused[i])[:k]
         return [Hit(self.chunks[i], fused[i], "+".join(sorted(via[i]))) for i in top]

@@ -108,7 +108,7 @@ function render(c) {
   if (c.status === "awaiting_approval" && p) {
     $("#review").innerHTML = `<p>The agent proposes a refund. Nothing moves until you decide.</p>
       <dl class="kv"><dt>Customer</dt><dd>${esc(c.customer)}</dd><dt>Transaction</dt><dd>${esc(p.transaction_id)} · ${esc(p.merchant)}</dd>
-      <dt>Amount</dt><dd><b>${sar(p.amount)}</b></dd><dt>Reason</dt><dd>${esc(p.reason)}</dd><dt>Policy</dt><dd>${esc(p.policy_section)}</dd></dl>
+      <dt>Amount</dt><dd><b>${sar(p.amount)}</b></dd><dt>Reason</dt><dd>${esc(p.reason)}</dd><dt>Policy</dt><dd>${esc(p.policy_section)}</dd>${p.source ? `<dt>Note</dt><dd><span class="pill warn">${esc(p.source)}</span></dd>` : ""}</dl>
       <div class="row"><button class="primary" id="approve">Approve refund</button><button class="bad" id="reject">Reject</button></div>`;
     $("#approve").onclick = () => decide(true);
     $("#reject").onclick = () => decide(false);

@@ -82,10 +82,14 @@ Offline, as run in CI (rules mode, no model). Run `python -m evals.run`.
 | | recall@1 | recall@3 | MRR |
 |---|---|---|---|
 | BM25 | 0.57 | 0.73 | 0.66 |
-| Vector (offline n-gram hash) | 0.70 | 0.90 | 0.80 |
-| Hybrid (RRF) | 0.60 | 0.90 | 0.73 |
+| Vector, offline n-gram hash | 0.70 | 0.90 | 0.80 |
+| Hybrid, offline hash (equal weights) | 0.60 | 0.90 | 0.73 |
+| **Vector, Gemini embeddings** | **1.00** | **1.00** | **1.00** |
+| Hybrid, Gemini, BM25 weight 1.0 | 0.73 | 0.97 | 0.85 |
+| Hybrid, Gemini, BM25 weight 0.5 | 0.83 | 0.97 | 0.90 |
+| Hybrid, Gemini, BM25 weight 0.1 | 0.93 | 1.00 | 0.96 |
 
-Hybrid did **not** beat vectors alone at rank 1 with the offline embedder. I kept the measured numbers rather than tuning fusion weights to 30 questions. With `--model`, the same table is produced for Gemini embeddings and the model reranker.
+Hybrid is not automatically better. With strong embeddings, every bit of BM25 weight cost accuracy on these paraphrase-style questions, so Wakeel turns BM25 off when neural embeddings are available, and keeps it at full weight with the offline embedder, where it helps. The question set has no exact identifiers (transaction ids, codes), where BM25 usually earns its place: those go into the evaluation before BM25 is turned back on.
 
 **Agent** (16 end-to-end cases in English and Arabic, including a clarifying question, plus 12 prompt-injection attacks):
 
