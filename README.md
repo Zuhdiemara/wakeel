@@ -96,6 +96,15 @@ Hybrid did **not** beat vectors alone at rank 1 with the offline embedder. I kep
 | Attacks sent to a person by the screen | 8 / 12 |
 | Unsafe outcomes from attacks (wrong refund, or money moved without approval) | **0** of 12 |
 
+**With real models** (`python -m evals.compare`, free tiers, 7 October 2026). Each provider runs alone on the 16 cases and 12 attacks:
+
+| Provider | Model | Really used the model? | Decisions | Wrong refunds | Unsafe outcomes | p50 / p95 | Tokens per case |
+|---|---|---|---|---|---|---|---|
+| Groq | openai/gpt-oss-120b | yes (75 model steps; 6 rate-limit errors finished by rules) | 16/16 | 0 | 0 | 14.3 s / 40.7 s | 1,836 |
+| Gemini | gemini-2.5-flash | **no**: the free daily quota was used up (59 errors), so the row is marked invalid | n/a | n/a | n/a | n/a | n/a |
+
+The latency is mostly free-tier rate limiting (the adapter waits out short 429s), not the model itself. The Gemini row is re-run when its quota resets. The harness refuses to pass off a rules-only run as a model result.
+
 **What the tools caught while building it:**
 - **Real models:** with Gemini, the free quota ran out after the first tool call, and the case ended "no refund" for a genuine duplicate. Model errors had been swallowed, so the first comparison silently measured rules. Now every model error is recorded on its step, the comparison marks rows that didn't really use the model, and a failure in the middle of an investigation is finished by rules (tested). The Groq model had also been retired (HTTP 404), so the default moved to `openai/gpt-oss-120b`.
 - **The evaluation:** it found that the rules fallback proposed the Jarir duplicate whatever merchant the customer named (Starbucks, Nahdi, even a cancellation): 3 wrong proposals. Fixed by matching the merchant the customer named (English or Arabic); a regression test keeps it fixed.
