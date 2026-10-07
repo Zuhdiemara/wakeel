@@ -72,7 +72,7 @@ flowchart LR
 | **Streaming** | `POST /api/cases/stream` sends each graph step as a server-sent event as it finishes, so the page shows the agent working live. |
 | **Metrics** | `GET /metrics` serves Prometheus metrics: cases by status and intent, human decisions, model calls and tokens by provider, provider fallbacks, tool calls and errors, and time per node. |
 | **MCP** | `python -m wakeel.mcp_server` serves the same four tools over stdio to any MCP client, with the same guarantees. |
-| **Deploy** | **Docker:** non-root image. **Kubernetes:** probes, an HPA and Secrets. **Render:** a free blueprint. **CI:** tests, evaluations, a container smoke test and an image push. |
+| **Deploy** | **Docker:** non-root image. **Kubernetes:** probes, an HPA and Secrets, **verified on every push** on a real cluster (kind) in CI: the manifests deploy 2 replicas, a case goes through the Service, `/metrics` answers, and the case's OpenTelemetry trace is read back from a real Jaeger (9 spans). **Render:** a free blueprint. **CI:** tests, evaluations, a container smoke test and an image push to GHCR. |
 
 ## Results
 
@@ -126,6 +126,8 @@ Hybrid is not automatically better. With strong embeddings, every bit of BM25 we
 - **The integration test against Daftar:** it hit Daftar's rate limit, because the ledger adapter made one API call per transaction (N+1). Fixed by caching captured transfers (they never change) and honouring `Retry-After`.
 
 **Reply quality:** `python -m evals.judge` has a model grade each final reply (grounded in the facts, in the customer's language, tone) from 1 to 5 with a reason, and lists replies to review. A judge is itself a model: compare its grades with a person's on a sample before trusting it.
+
+**Choosing a framework, measured:** [`crew/dispute_crew.py`](crew/dispute_crew.py) builds the same task with CrewAI, using the same tools and code-level guards, and scores it on the same cases and attacks (a CI job, with the `GROQ_API_KEY` secret). The difference is who decides the flow: a crew of role-based agents, or LangGraph code. CrewAI also has no durable pause for a customer's answer or a reviewer's approval. The point is to compare from data, not opinion.
 
 **Choosing a model, measured:** `python -m evals.compare` runs the same cases and attacks on each configured provider on its own, and reports intent and decision accuracy, wrong refunds, unsafe outcomes, p50 and p95 latency, tokens per case, and how often each fell back to rules. Model choice is a measured trade-off, made per task.
 
