@@ -58,3 +58,31 @@ def test_rate_limits_are_retryable_and_bad_requests_are_not(monkeypatch):
         with pytest.raises(llm.LLMError) as e:
             llm.Gemini("k").chat([{"role": "user", "content": "hi"}])
         assert e.value.retryable is retryable
+
+
+def test_model_chain_from_env(monkeypatch):
+    for k in ("GEMINI_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "WAKEEL_MODELS"):
+        monkeypatch.setenv(k, "")
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setenv("GROQ_API_KEY", "q")
+    chain = llm.from_env().providers
+    assert [p.model for p in chain] == [s.split(":", 1)[1] for s in llm.DEFAULT_CHAIN]
+    assert not chain[-1].supports_tools                            # ALLaM: chat only
+    monkeypatch.setenv("WAKEEL_MODELS", "groq:openai/gpt-oss-20b, mistral:mistral-small-latest")
+    assert [p.model for p in llm.from_env().providers] == ["openai/gpt-oss-20b"]   # no Mistral key: skipped
+
+
+def test_chat_only_models_are_skipped_for_tool_steps():
+    used = []
+    chat_only = llm.Scripted(lambda *a: (used.append("allam"), llm.Reply(text="hi"))[1], "allam")
+    chat_only.supports_tools = False
+    tooly = llm.Scripted(lambda *a: (used.append("tools"), llm.Reply(text="ok"))[1], "groq")
+    f = llm.Fallback([chat_only, tooly])
+    f.chat([{"role": "user", "content": "x"}], tools=TOOLS)
+    f.chat([{"role": "user", "content": "x"}])
+    assert used == ["tools", "allam"]
+
+
+def test_gemini_thinking_parts_are_not_the_answer(wire):
+    wire["answer"] = {"candidates": [{"content": {"parts": [{"text": "The user wants...", "thought": True}, {"text": "ok"}]}}]}
+    assert llm.Gemini("k").chat([{"role": "user", "content": "hi"}]).text == "ok"

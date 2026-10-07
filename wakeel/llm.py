@@ -73,6 +73,8 @@ def _post(url: str, headers: dict, body: dict, timeout: float = 45, retries: int
 # ---------------------------------------------------------------- Gemini
 
 class Gemini:
+    supports_tools = True
+
     def __init__(self, key: str, model: str = "gemini-2.5-flash"):
         self.key, self.model, self.name = key, model, "gemini"
 
@@ -101,6 +103,8 @@ class Gemini:
         parts = (d.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
         rep = Reply(provider=self.name, model=self.model, ms=int((time.monotonic() - t0) * 1000))
         for i, p in enumerate(parts):
+            if p.get("thought"):           # a thinking model's reasoning, not its answer
+                continue
             if "text" in p:
                 rep.text += p["text"]
             if "functionCall" in p:
@@ -113,8 +117,8 @@ class Gemini:
 # ------------------------------------------------- OpenAI-compatible (Groq, OpenAI)
 
 class OpenAICompatible:
-    def __init__(self, key: str, model: str, base: str, name: str):
-        self.key, self.model, self.base, self.name = key, model, base.rstrip("/"), name
+    def __init__(self, key: str, model: str, base: str, name: str, supports_tools: bool = True):
+        self.key, self.model, self.base, self.name, self.supports_tools = key, model, base.rstrip("/"), name, supports_tools
 
     def chat(self, messages, tools=None, json_mode=False) -> Reply:
         wire = []
@@ -126,7 +130,9 @@ class OpenAICompatible:
                 wire.append({"role": "tool", "tool_call_id": m["tool_call_id"], "content": m["content"]})
             else:
                 wire.append({"role": m["role"], "content": m["content"]})
-        body: dict[str, Any] = {"model": self.model, "messages": wire, "temperature": 0.1}
+        # An explicit output cap: some free tiers count the requested maximum
+        # against the per-minute token budget and reject an uncapped request.
+        body: dict[str, Any] = {"model": self.model, "messages": wire, "temperature": 0.1, "max_tokens": 1500}
         if tools:
             body["tools"] = [{"type": "function", "function": t} for t in tools]
         if json_mode:
@@ -149,6 +155,8 @@ class OpenAICompatible:
 # ---------------------------------------------------------------- Claude
 
 class Claude:
+    supports_tools = True
+
     def __init__(self, key: str, model: str = "claude-haiku-4-5-20251001"):
         self.key, self.model, self.name = key, model, "claude"
 
@@ -202,6 +210,8 @@ class Fallback:
     def chat(self, messages, tools=None, json_mode=False) -> Reply:
         last: LLMError | None = None
         for p in self.providers:
+            if tools and not getattr(p, "supports_tools", True):
+                continue                   # a chat-only model is skipped for tool steps
             try:
                 return p.chat(messages, tools, json_mode)
             except LLMError as e:
@@ -214,6 +224,7 @@ class Fallback:
 
 
 class Scripted:
+    supports_tools = True
     """A deterministic stand-in for tests and offline evaluation: a function
     from the conversation to a Reply."""
 
@@ -226,16 +237,45 @@ class Scripted:
         return r
 
 
+# Free models verified on 7 October 2026 (chat, tool calling, Arabic), in the
+# default order of preference. Each has its own free quota, so a longer chain
+# also keeps the agent on a model for longer before falling back to rules.
+DEFAULT_CHAIN = [
+    "gemini:gemini-2.5-flash",
+    "groq:openai/gpt-oss-120b",
+    "gemini:gemini-3.5-flash-lite",
+    "groq:openai/gpt-oss-20b",
+    "gemini:gemini-3.1-flash-lite",
+    "gemini:gemma-4-26b-a4b-it",
+    "groq:allam-2-7b",              # SDAIA's Arabic model: chat only, no tool calling
+]
+CHAT_ONLY = {"allam-2-7b"}
+
+
+def build(spec: str):
+    """One provider from "vendor:model", using that vendor's key from the environment."""
+    vendor, model = spec.split(":", 1)
+    vendor = vendor.strip().lower()
+    key = {"gemini": "GEMINI_API_KEY", "groq": "GROQ_API_KEY", "claude": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY",
+           "cerebras": "CEREBRAS_API_KEY", "openrouter": "OPENROUTER_API_KEY", "mistral": "MISTRAL_API_KEY", "github": "GITHUB_MODELS_TOKEN"}.get(vendor)
+    if key is None or not os.getenv(key):
+        return None
+    k = os.environ[key]
+    if vendor == "gemini":
+        return Gemini(k, model)
+    if vendor == "claude":
+        return Claude(k, model)
+    base = {"groq": "https://api.groq.com/openai/v1", "openai": "https://api.openai.com/v1", "cerebras": "https://api.cerebras.ai/v1",
+            "openrouter": "https://openrouter.ai/api/v1", "mistral": "https://api.mistral.ai/v1", "github": "https://models.github.ai/inference"}[vendor]
+    return OpenAICompatible(k, model, base, vendor, supports_tools=model not in CHAT_ONLY)
+
+
 def from_env(on_switch=None) -> Fallback:
-    """Providers from the environment, in order of preference: Gemini, then
-    Groq (both have free tiers), then Claude and OpenAI if keys are present."""
-    ps: list = []
-    if k := os.getenv("GEMINI_API_KEY"):
-        ps.append(Gemini(k, os.getenv("GEMINI_MODEL", "gemini-2.5-flash")))
-    if k := os.getenv("GROQ_API_KEY"):
-        ps.append(OpenAICompatible(k, os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"), "https://api.groq.com/openai/v1", "groq"))
-    if k := os.getenv("ANTHROPIC_API_KEY"):
-        ps.append(Claude(k, os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")))
-    if k := os.getenv("OPENAI_API_KEY"):
-        ps.append(OpenAICompatible(k, os.getenv("OPENAI_MODEL", "gpt-4.1-mini"), "https://api.openai.com/v1", "openai"))
+    """The provider chain: WAKEEL_MODELS ("vendor:model,vendor:model,...") or the
+    default chain, keeping the models whose vendor has a key configured.
+    Vendors: gemini, groq, claude, openai, cerebras, openrouter, mistral, github."""
+    specs = [x.strip() for x in os.getenv("WAKEEL_MODELS", "").split(",") if x.strip()] or DEFAULT_CHAIN
+    ps = [p for p in (build(x) for x in specs) if p is not None]
+    if not os.getenv("WAKEEL_MODELS"):           # paid vendors only when their keys are set
+        ps += [p for p in (build("claude:claude-haiku-4-5-20251001"), build("openai:gpt-4.1-mini")) if p is not None]
     return Fallback(ps, on_switch)
