@@ -42,10 +42,16 @@ def main():
         if not s.get("reply"):
             continue
         facts = {"lang": s["lang"], "policy": s.get("policy", {}).get("answer"), "proposal": s.get("proposal"), "refund": s.get("refund")}
-        r = model.chat([{"role": "system", "content": RUBRIC},
-                        {"role": "user", "content": json.dumps({"customer": s["text"], "facts": facts, "reply": s["reply"]}, ensure_ascii=False, default=str)}], json_mode=True)
-        g = json.loads(r.text)
+        try:
+            r = model.chat([{"role": "system", "content": RUBRIC},
+                            {"role": "user", "content": json.dumps({"customer": s["text"], "facts": facts, "reply": s["reply"]}, ensure_ascii=False, default=str)}], json_mode=True)
+            g = json.loads(r.text)
+        except Exception as e:                 # a quota or a malformed grade: skip, and say so
+            print("  skipped:", c["msg"], "→", str(e)[:120])
+            continue
         rows.append({"msg": c["msg"], **{k: g.get(k) for k in ("grounded", "language", "tone", "reason")}})
+    if not rows:
+        raise SystemExit("No case could be graded (check the model quotas).")
     (HERE / "judge.json").write_text(json.dumps(rows, indent=1, ensure_ascii=False))
     for k in ("grounded", "language", "tone"):
         print(f"{k:9} mean {statistics.mean(r[k] for r in rows):.2f}  min {min(r[k] for r in rows)}")

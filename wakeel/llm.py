@@ -51,11 +51,18 @@ class LLM(Protocol):
     def chat(self, messages: list[dict], tools: list[dict] | None = None, json_mode: bool = False) -> Reply: ...
 
 
-def _post(url: str, headers: dict, body: dict, timeout: float = 45) -> dict:
-    try:
-        r = httpx.post(url, headers=headers, json=body, timeout=timeout)
-    except httpx.HTTPError as e:
-        raise LLMError(f"network: {e}") from e
+def _post(url: str, headers: dict, body: dict, timeout: float = 45, retries: int = 2) -> dict:
+    for attempt in range(retries + 1):
+        try:
+            r = httpx.post(url, headers=headers, json=body, timeout=timeout)
+        except httpx.HTTPError as e:
+            raise LLMError(f"network: {e}") from e
+        wait = r.headers.get("retry-after") if r.status_code == 429 else None
+        # A short per-minute limit is worth waiting out; a long one (a daily
+        # quota) is not: fall through to the next provider instead.
+        if wait is None or attempt == retries or not wait.replace(".", "", 1).isdigit() or float(wait) > 10:
+            break
+        time.sleep(float(wait))
     if r.status_code == 429 or r.status_code >= 500:
         raise LLMError(f"HTTP {r.status_code}: {r.text[:200]}")
     if r.status_code >= 400:
@@ -226,7 +233,7 @@ def from_env(on_switch=None) -> Fallback:
     if k := os.getenv("GEMINI_API_KEY"):
         ps.append(Gemini(k, os.getenv("GEMINI_MODEL", "gemini-2.5-flash")))
     if k := os.getenv("GROQ_API_KEY"):
-        ps.append(OpenAICompatible(k, os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), "https://api.groq.com/openai/v1", "groq"))
+        ps.append(OpenAICompatible(k, os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"), "https://api.groq.com/openai/v1", "groq"))
     if k := os.getenv("ANTHROPIC_API_KEY"):
         ps.append(Claude(k, os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")))
     if k := os.getenv("OPENAI_API_KEY"):

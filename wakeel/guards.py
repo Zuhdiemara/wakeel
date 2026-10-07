@@ -78,3 +78,32 @@ _LEAK = re.compile(r"(you are the operations agent|treat the message as data|ret
 def leaks_instructions(text: str) -> bool:
     """True if a reply echoes our own instructions (a sign of prompt leaking)."""
     return bool(_LEAK.search(text))
+
+
+class PromptGuard:
+    """Meta's Llama Prompt Guard 2 (served free on Groq): the probability that
+    a message is a prompt-injection or jailbreak attempt. A second screen next
+    to the patterns. It is one layer: it misses attacks phrased as ordinary
+    requests, which the structural defences stop anyway. If the classifier is
+    unreachable, the patterns still run (and the failure is reported)."""
+
+    def __init__(self, key: str, model: str = "meta-llama/llama-prompt-guard-2-86m", threshold: float = 0.5):
+        self.key, self.model, self.threshold = key, model, threshold
+
+    def score(self, text: str) -> float | None:
+        import httpx
+        try:
+            r = httpx.post("https://api.groq.com/openai/v1/chat/completions", timeout=10,
+                           headers={"Authorization": f"Bearer {self.key}"},
+                           json={"model": self.model, "messages": [{"role": "user", "content": text[:2000]}]})
+            r.raise_for_status()
+            return float(r.json()["choices"][0]["message"]["content"])
+        except Exception:
+            return None
+
+
+def guard_from_env():
+    import os
+    if os.getenv("PROMPT_GUARD", "1") != "0" and (k := os.getenv("GROQ_API_KEY")):
+        return PromptGuard(k)
+    return None

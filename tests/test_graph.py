@@ -136,3 +136,23 @@ def test_the_agent_asks_which_merchant_when_several_qualify(make_agent):
     assert c["status"] == "awaiting_approval" and c["proposal"]["transaction_id"] == "tx_1002"
     assert "4111 1111" not in c["text"]                                        # the answer is masked too
     assert agent.decide(c["case_id"], True, "r")["status"] == "refunded" and ledger.refund_calls == 1
+
+
+def test_a_model_that_fails_mid_investigation_is_finished_by_rules(make_agent):
+    # Found with real Gemini: the free quota ran out after the first tool call
+    # and the case ended "no refund" for a genuine duplicate.
+    good = scripted([[("find_duplicates", {})]])
+    calls = {"ops": 0}
+
+    def fn(msgs, tools, json_mode):
+        if "operations agent" in msgs[0]["content"]:
+            calls["ops"] += 1
+            if calls["ops"] > 1:
+                raise LLMError("HTTP 429: quota")
+        return good.fn(msgs, tools, json_mode)
+
+    agent, _ = make_agent(Scripted(fn))
+    c = agent.start("sara", DUP)
+    ops = next(t for t in c["trace"] if t["node"] == "ops_agent")
+    assert ops["model_failed"] and ops["mode"] == "rules" and "429" in ops["llm_errors"][0]
+    assert c["proposal"]["transaction_id"] == "tx_1002"

@@ -17,6 +17,7 @@ from pathlib import Path
 from wakeel import llm as llms
 from wakeel.graph import Agent, Deps
 from wakeel.ledger import demo_ledger
+from wakeel.guards import guard_from_env, injection_signals
 from wakeel.rag import HashEmbedder, Index, embedder_from_env, load_corpus
 
 HERE = Path(__file__).parent
@@ -74,6 +75,23 @@ def agent(model) -> dict:
             "unsafe_outcomes": unsafe, "seconds": round(time.monotonic() - t0, 1), "failures": failures}
 
 
+def screens(guard) -> dict:
+    """How each screen does on its own: attacks caught, genuine messages flagged."""
+    attacks = [c["msg"] for c in load("injection.jsonl")]
+    benign = [c["msg"] for c in load("agent.jsonl")]
+    out = {"patterns": {"attacks_caught": sum(bool(injection_signals(m)) for m in attacks), "attacks": len(attacks),
+                        "genuine_flagged": sum(bool(injection_signals(m)) for m in benign), "genuine": len(benign)}}
+    if guard is not None:
+        sa = [guard.score(m) for m in attacks]
+        sb = [guard.score(m) for m in benign]
+        out["prompt_guard"] = {"attacks_caught": sum(x is not None and x >= guard.threshold for x in sa), "attacks": len(attacks),
+                               "genuine_flagged": sum(x is not None and x >= guard.threshold for x in sb), "genuine": len(benign),
+                               "unavailable": sum(x is None for x in sa + sb)}
+        out["either"] = {"attacks_caught": sum(bool(injection_signals(m)) or (x is not None and x >= guard.threshold) for m, x in zip(attacks, sa)),
+                         "attacks": len(attacks)}
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", action="store_true", help="use the configured LLM providers")
@@ -86,9 +104,12 @@ def main():
     if args.model:
         res["retrieval"].update(retrieval(Index(load_corpus(HERE.parent / "corpus"), embedder_from_env()), "gemini"))
     res["agent" + (" (model)" if model else " (rules)")] = agent(model)
+    res["injection_screens"] = screens(guard_from_env() if args.model else None)
     (HERE / ("results.model.json" if model else "results.json")).write_text(json.dumps(res, indent=1, ensure_ascii=False))
     for k, v in res["retrieval"].items():
         print(f"{k:22} recall@1 {v['recall@1']:.2f}  recall@3 {v['recall@3']:.2f}  MRR {v['mrr']:.2f}")
+    for k, v in res["injection_screens"].items():
+        print(f"screen {k:13}", v)
     for k, v in res.items():
         if k.startswith("agent"):
             print(k, {x: y for x, y in v.items() if x != "failures"})

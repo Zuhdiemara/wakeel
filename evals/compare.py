@@ -24,7 +24,7 @@ def providers() -> list:
 
 def run(provider, index: Index, cases: list[dict], attacks: list[dict]) -> dict:
     correct = intents = wrong = unsafe = 0
-    lat, toks, model_steps, rules_steps = [], [], 0, 0
+    lat, toks, model_steps, rules_steps, errors = [], [], 0, 0, []
     for c in cases + attacks:
         ledger = demo_ledger()
         a = Agent(Deps(provider, index, ledger))
@@ -34,6 +34,7 @@ def run(provider, index: Index, cases: list[dict], attacks: list[dict]) -> dict:
         spans = s["trace"]
         toks.append(sum(x.get("tokens_in", 0) + x.get("tokens_out", 0) for x in spans))
         model_steps += sum(1 for x in spans if x.get("provider"))
+        errors += [e for x in spans for e in x.get("llm_errors", [])]
         rules_steps += sum(1 for x in spans if x.get("why") == "rules" or x.get("mode") == "rules" or x.get("template"))
         got = (s.get("proposal") or {}).get("transaction_id")
         if "intent" in c:
@@ -46,7 +47,9 @@ def run(provider, index: Index, cases: list[dict], attacks: list[dict]) -> dict:
     return {"provider": provider.name, "model": getattr(provider, "model", ""), "intent_accuracy": round(intents / n, 3),
             "decision_accuracy": round(correct / n, 3), "wrong_refunds": wrong, "unsafe_from_attacks": unsafe,
             "p50_seconds": round(statistics.median(lat), 2), "p95_seconds": round(sorted(lat)[int(0.95 * (len(lat) - 1))], 2),
-            "tokens_per_case": round(statistics.mean(toks)), "fell_back_to_rules": rules_steps, "model_steps": model_steps}
+            "tokens_per_case": round(statistics.mean(toks)), "fell_back_to_rules": rules_steps, "model_steps": model_steps,
+            "model_errors": len(errors), "first_errors": sorted(set(errors))[:3],
+            "valid": model_steps > 0 and len(errors) < model_steps}   # otherwise the row measured the rules, not the model
 
 
 def main():
@@ -60,10 +63,12 @@ def main():
     index = Index(load_corpus(HERE.parent / "corpus"), embedder_from_env())
     rows = [run(p, index, cases, attacks) for p in providers()]
     (HERE / "compare.json").write_text(json.dumps(rows, indent=1))
-    cols = ["provider", "model", "intent_accuracy", "decision_accuracy", "wrong_refunds", "unsafe_from_attacks", "p50_seconds", "p95_seconds", "tokens_per_case", "fell_back_to_rules"]
+    cols = ["provider", "model", "valid", "intent_accuracy", "decision_accuracy", "wrong_refunds", "unsafe_from_attacks", "p50_seconds", "p95_seconds", "tokens_per_case", "model_steps", "model_errors", "fell_back_to_rules"]
     print(" | ".join(cols))
     for r in rows:
         print(" | ".join(str(r[c]) for c in cols))
+        for e in r["first_errors"]:
+            print("   error:", e)
 
 
 if __name__ == "__main__":

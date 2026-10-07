@@ -21,7 +21,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from . import llm as llms
-from . import metrics, otel
+from . import guards, metrics, otel
 from .graph import Agent, Deps
 from .cache import SemanticCache
 from .store import Store
@@ -72,7 +72,9 @@ def build(db_path: str | None = None) -> tuple[Agent, dict]:
     corpus_version = hashlib.sha256("".join(c.text for c in index.chunks).encode()).hexdigest()[:12]
     cache = SemanticCache(index.embedder, corpus_version)
     info["cache"] = {"corpus_version": corpus_version}
-    return Agent(Deps(model, index, ledger, cache=cache), checkpointer=SqliteSaver(conn), store=store, on_spans=on_spans), info
+    guard = guards.guard_from_env()
+    info["injection_screen"] = "patterns + prompt guard" if guard else "patterns"
+    return Agent(Deps(model, index, ledger, cache=cache, guard=guard), checkpointer=SqliteSaver(conn), store=store, on_spans=on_spans), info
 
 
 agent, info = build()
