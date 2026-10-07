@@ -78,7 +78,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", action="store_true", help="use the configured LLM providers")
     args = ap.parse_args()
-    model = llms.from_env() if args.model else None
+    try:
+        model = llms.from_env() if args.model else None
+    except ValueError:
+        sys.exit("No model keys found. Add GEMINI_API_KEY and/or GROQ_API_KEY to wakeel/.env (see .env.example), or run without --model.")
     res = {"retrieval": retrieval(Index(load_corpus(HERE.parent / "corpus"), HashEmbedder()), "hash")}
     if args.model:
         res["retrieval"].update(retrieval(Index(load_corpus(HERE.parent / "corpus"), embedder_from_env()), "gemini"))

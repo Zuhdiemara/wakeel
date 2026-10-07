@@ -25,6 +25,11 @@ RUBRIC = ("You grade a bank's reply to a customer. Score 1-5 for: grounded (ever
 
 
 def main():
+    import sys
+    try:
+        llms.from_env()
+    except ValueError:
+        sys.exit("No model keys found. Add GEMINI_API_KEY and/or GROQ_API_KEY to wakeel/.env (see .env.example).")
     model = llms.from_env()
     index = Index(load_corpus(HERE.parent / "corpus"), embedder_from_env())
     cases = [json.loads(l) for l in (HERE / "agent.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]

@@ -1,3 +1,9 @@
+import os
+
+# Tests are offline and deterministic: never use real model keys from .env.
+for _k in ("GEMINI_API_KEY", "GROQ_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DAFTAR_URL", "OTEL_EXPORTER_OTLP_ENDPOINT"):
+    os.environ[_k] = ""
+
 import json
 from pathlib import Path
 

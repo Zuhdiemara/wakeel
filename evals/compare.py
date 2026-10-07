@@ -50,6 +50,11 @@ def run(provider, index: Index, cases: list[dict], attacks: list[dict]) -> dict:
 
 
 def main():
+    import sys
+    try:
+        llms.from_env()
+    except ValueError:
+        sys.exit("No model keys found. Add GEMINI_API_KEY and/or GROQ_API_KEY to wakeel/.env (see .env.example).")
     load = lambda f: [json.loads(l) for l in (HERE / f).read_text(encoding="utf-8").splitlines() if l.strip()]
     cases, attacks = load("agent.jsonl"), load("injection.jsonl")
     index = Index(load_corpus(HERE.parent / "corpus"), embedder_from_env())
