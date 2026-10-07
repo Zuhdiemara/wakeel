@@ -9,3 +9,4 @@ evals/results.model.json
 .data/
 evals/judge.json
 evals/compare.json
+evals/crew.json

@@ -84,3 +84,26 @@ jobs:
           echo "--- services:"; curl -s localhost:16686/api/v3/services | head -c 300; echo
           kubectl logs deployment/jaeger --tail=30
           echo "no trace reached Jaeger"; kubectl logs deployment/wakeel --tail=50; exit 1
+
+  # The same task built with CrewAI, measured with the same cases and attacks.
+  # Needs the GROQ_API_KEY repository secret (free tier); skipped without it.
+  crewai:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - id: ready
+        run: '[ -n "$GROQ_API_KEY" ] && echo "ok=1" >> "$GITHUB_OUTPUT" || echo "::notice::GROQ_API_KEY secret not set; skipping the CrewAI comparison"'
+      - if: steps.ready.outputs.ok
+        uses: actions/checkout@v4
+      - if: steps.ready.outputs.ok
+        uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - if: steps.ready.outputs.ok
+        run: pip install crewai numpy httpx
+      - if: steps.ready.outputs.ok
+        run: |
+          python -m crew.dispute_crew | tee crew.log
+          { echo "### CrewAI on the same evaluation"; echo '```'; tail -1 crew.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
