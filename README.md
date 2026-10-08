@@ -119,7 +119,13 @@ Hybrid is not automatically better. With strong embeddings, every bit of BM25 we
 - Latency is mostly free-tier rate limiting, not the models.
 - Whatever the model, wrong refunds and unsafe outcomes stay at 0, because the safety is structural.
 
+**Live model in CI.** With the `GROQ_API_KEY` secret, every push also runs the evaluation against the real model chain. The latest result is 16/16 intents, 16/16 decisions, 0 wrong refunds and 0 unsafe outcomes from 12 attacks; a wrong refund fails the build.
+
 **What the tools caught while building it:**
+- **More from the live model in CI:**
+  - the model's citations arrived as objects instead of ids and crashed the policy agent, so any shape is now accepted and anything unrecognisable is dropped;
+  - an Arabic "my Noon order never arrived" came back as "other", so when the model abstains, the rules classify (each tested);
+  - the first CrewAI job errored on every case but still showed green, because its output went through `tee`; fixed with `pipefail`.
 - **The live model in CI guessed:** for "I was charged twice last week" (two qualifying merchants, none named), the model proposed Jarir's refund instead of asking, and CI failed on the wrong refund. Now `propose_refund` refuses in code when the customer hasn't named the merchant and several duplicates qualify, and tells the model to ask (tested). Never guessing is enforced by the tool, not requested in the prompt.
 - **Seven models in one chain:** ALLaM rejected JSON mode with HTTP 400, and the chain treated any 400 as final, stopping instead of trying the next model. With mixed models a 400 usually means "not supported here", so the chain now moves on (tested).
 - **Real models:** with Gemini, the free quota ran out after the first tool call, and the case ended "no refund" for a genuine duplicate. Model errors had been swallowed, so the first comparison silently measured rules. Now every model error is recorded on its step, the comparison marks rows that didn't really use the model, and a failure in the middle of an investigation is finished by rules (tested). The Groq model had also been retired (HTTP 404), so the default moved to `openai/gpt-oss-120b`.
