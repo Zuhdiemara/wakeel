@@ -172,3 +172,11 @@ def test_a_model_cannot_guess_between_merchants(make_agent):
     c = agent.start("sara", "I was charged twice last week")
     assert "ambiguous" in c["ops"]["steps"][0]["result"]["error"]
     assert c["status"] == "needs_info" and c.get("proposal") is None
+
+
+def test_rules_classify_when_the_model_abstains(make_agent):
+    # Seen with the live model: "طلبي من نون لم يصل" came back as "other".
+    agent, _ = make_agent(scripted([], supervisor_intent="other"))
+    c = agent.start("sara", "طلبي من نون لم يصل")
+    sup = next(t for t in c["trace"] if t["node"] == "supervisor")
+    assert c["intent"] == "not_received" and sup["why"] == "rules (model said other)" and c["status"] != "handed_off"

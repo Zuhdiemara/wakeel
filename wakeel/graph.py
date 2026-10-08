@@ -154,6 +154,10 @@ def make_graph(deps: Deps, checkpointer=None):
         why = "model"
         if intent not in INTENTS:
             intent, why = classify_rules(s["text"]), "rules"
+        elif intent == "other" and (ruled := classify_rules(s["text"])) != "other":
+            # The model abstained (seen with Arabic, "my Noon order never
+            # arrived"), but the rules recognise the request: use them.
+            intent, why = ruled, "rules (model said other)"
         return {"intent": intent, "trace": [_span("supervisor", t0, rep, intent=intent, why=why)]}
 
     def route(s: State) -> str:
