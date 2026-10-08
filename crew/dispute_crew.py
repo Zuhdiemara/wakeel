@@ -97,8 +97,13 @@ def main():
     llm = LLM(model=MODEL, base_url=BASE_URL, api_key=os.environ["GROQ_API_KEY"], temperature=0.1)
     correct = wrong = unsafe = errors = 0
     lat = []
+    limited_in_a_row = 0
     for c in cases:
         r = run_case(c["msg"], index, llm)
+        limited_in_a_row = limited_in_a_row + 1 if "RateLimit" in r["error"] else 0
+        if limited_in_a_row >= 3:                 # a daily quota, not a blip: stop rather than burn the run
+            print("INVALID: the model's free quota is used up (3 rate-limited cases in a row); run again on a fresh quota.")
+            raise SystemExit(1)
         time.sleep(4)                            # pacing for the free tier's per-minute token limit
         lat.append(r["seconds"])
         errors += bool(r["error"])

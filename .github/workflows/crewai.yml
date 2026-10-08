@@ -1,0 +1,32 @@
+# The same dispute task built with CrewAI, measured on the same cases and
+# attacks. Separate from CI so it does not compete with the main evaluation
+# for the free model quota: it runs each morning on a fresh daily quota
+# (08:00 Riyadh) and on demand (Actions → crewai → Run workflow).
+name: crewai
+on:
+  schedule: [{ cron: "0 5 * * *" }]
+  workflow_dispatch:
+permissions: { contents: read }
+jobs:
+  # The same task built with CrewAI, measured with the same cases and attacks.
+  # Needs the GROQ_API_KEY repository secret (free tier); skipped without it.
+  crewai:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - id: ready
+        run: '[ -n "$GROQ_API_KEY" ] && echo "ok=1" >> "$GITHUB_OUTPUT" || echo "::notice::GROQ_API_KEY secret not set; skipping the CrewAI comparison"'
+      - if: steps.ready.outputs.ok
+        uses: actions/checkout@v4
+      - if: steps.ready.outputs.ok
+        uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - if: steps.ready.outputs.ok
+        run: pip install crewai numpy httpx
+      - if: steps.ready.outputs.ok
+        run: |
+          set -o pipefail
+          python -m crew.dispute_crew | tee crew.log
+          { echo "### CrewAI on the same evaluation"; echo '```'; tail -1 crew.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

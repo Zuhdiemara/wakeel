@@ -128,7 +128,7 @@ Hybrid is not automatically better. With strong embeddings, every bit of BM25 we
 
 **Reply quality:** `python -m evals.judge` has a model grade each final reply (grounded in the facts, in the customer's language, tone) from 1 to 5 with a reason, and lists replies to review. A judge is itself a model: compare its grades with a person's on a sample before trusting it.
 
-**Choosing a framework, measured:** [`crew/dispute_crew.py`](crew/dispute_crew.py) builds the same task with CrewAI, using the same tools and code-level guards, and scores it on the same cases and attacks (a CI job, with the `GROQ_API_KEY` secret). The difference is who decides the flow: a crew of role-based agents, or LangGraph code. CrewAI also has no durable pause for a customer's answer or a reviewer's approval. The point is to compare from data, not opinion.
+**Choosing a framework, measured:** [`crew/dispute_crew.py`](crew/dispute_crew.py) builds the same task with CrewAI, using the same tools and code-level guards, and scores it on the same cases and attacks (its own workflow, each morning on a fresh free quota and on demand, with the `GROQ_API_KEY` secret). The difference is who decides the flow: a crew of role-based agents, or LangGraph code. CrewAI also has no durable pause for a customer's answer or a reviewer's approval. The point is to compare from data, not opinion.
 
 **Choosing a model, measured:** `python -m evals.compare` runs the same cases and attacks on each configured provider on its own, and reports intent and decision accuracy, wrong refunds, unsafe outcomes, p50 and p95 latency, tokens per case, and how often each fell back to rules. Model choice is a measured trade-off, made per task.
 
