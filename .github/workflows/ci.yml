@@ -105,5 +105,6 @@ jobs:
         run: pip install crewai numpy httpx
       - if: steps.ready.outputs.ok
         run: |
+          set -o pipefail
           python -m crew.dispute_crew | tee crew.log
           { echo "### CrewAI on the same evaluation"; echo '```'; tail -1 crew.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

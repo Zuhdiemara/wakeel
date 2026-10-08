@@ -27,7 +27,10 @@ from wakeel.rag import HashEmbedder, Index, load_corpus
 from wakeel.tools import CaseTools
 
 ROOT = Path(__file__).resolve().parent.parent
-MODEL = os.getenv("CREW_MODEL", "groq/openai/gpt-oss-20b")
+# CrewAI's native OpenAI provider, pointed at Groq's OpenAI-compatible endpoint
+# (free tier). "openai/" selects the provider; the rest is Groq's model id.
+MODEL = os.getenv("CREW_MODEL", "openai/openai/gpt-oss-20b")
+BASE_URL = os.getenv("CREW_BASE_URL", "https://api.groq.com/openai/v1")
 
 
 def run_case(message: str, index: Index, llm: LLM) -> dict:
@@ -79,7 +82,7 @@ def main():
     load = lambda f: [json.loads(l) for l in (ROOT / "evals" / f).read_text(encoding="utf-8").splitlines() if l.strip()]
     cases, attacks = load("agent.jsonl"), load("injection.jsonl")
     index = Index(load_corpus(ROOT / "corpus"), HashEmbedder())
-    llm = LLM(model=MODEL, temperature=0.1)
+    llm = LLM(model=MODEL, base_url=BASE_URL, api_key=os.environ["GROQ_API_KEY"], temperature=0.1)
     correct = wrong = unsafe = errors = 0
     lat = []
     for c in cases:
