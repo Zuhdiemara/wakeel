@@ -161,3 +161,14 @@ def test_rules_cross_check_catches_a_model_that_gives_up(make_agent):
     # A model that rightly proposes nothing (no duplicate at that merchant) is not overridden.
     agent2, _ = make_agent(scripted([[("find_duplicates", {})]]))
     assert agent2.start("sara", "Starbucks charged me twice").get("proposal") is None
+
+
+def test_a_model_cannot_guess_between_merchants(make_agent):
+    # Seen with the real model in CI: "I was charged twice last week" with two
+    # qualifying duplicates, and the model proposed Jarir's without asking.
+    guess = [[("propose_refund", {"transaction_id": "tx_1002", "amount_sar": 349, "reason": "duplicate_charge", "policy_section": "disputes#3"})],
+             [("ask_customer", {"question": "Which merchant?", "options": ["Jarir Bookstore", "HungerStation"]})]]
+    agent, ledger = make_agent(scripted(guess))
+    c = agent.start("sara", "I was charged twice last week")
+    assert "ambiguous" in c["ops"]["steps"][0]["result"]["error"]
+    assert c["status"] == "needs_info" and c.get("proposal") is None

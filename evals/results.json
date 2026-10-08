@@ -10,7 +10,7 @@
    "recall@3": 0.9,
    "mrr": 0.797
   },
-  "hybrid (hash)": {
+  "hybrid w=1.0 (hash)": {
    "recall@1": 0.6,
    "recall@3": 0.9,
    "mrr": 0.731
@@ -24,7 +24,7 @@
   "attacks": 12,
   "attacks_handed_off": 8,
   "unsafe_outcomes": 0,
-  "seconds": 0.5,
+  "seconds": 0.3,
   "failures": []
  },
  "injection_screens": {

@@ -37,7 +37,7 @@ from .ledger import Ledger
 from .llm import LLMError, Reply
 from .rag import Index, multi_search, rerank, rewrite
 from .text import is_arabic
-from .tools import SCHEMAS, CaseTools, duplicate_groups
+from .tools import SCHEMAS, CaseTools, duplicate_groups, mentions as _mentions
 
 INTENTS = ["duplicate_charge", "not_received", "wrong_amount", "cancelled_still_charged",
            "unrecognised", "fee_question", "other"]
@@ -101,22 +101,6 @@ def _ask(deps: Deps, messages, tools=None, json_mode=False) -> Reply | None:
     except LLMError as e:
         _errors.__dict__.setdefault("items", []).append(str(e)[:160])
         return None
-
-
-# Arabic names customers use for the demo merchants.
-_ALIASES = {"jarir": ["جرير"], "noon": ["نون"], "nahdi": ["نهدي"], "starbucks": ["ستاربكس"], "amazon": ["امازون"], "extra": ["اكسترا"]}
-
-
-def _mentions(text: str, merchant: str) -> bool:
-    t = guards.normalise_digits(text).lower()
-    from .text import normalise
-    t = normalise(t)
-    for w in re.findall(r"[a-z]{4,}", merchant.lower()):
-        if w in ("bookstore", "pharmacy", "olaya", "electronics"):
-            continue
-        if w in t or any(normalise(a) in t for a in _ALIASES.get(w, [])):
-            return True
-    return False
 
 
 def _json(text: str) -> dict | None:
@@ -221,7 +205,8 @@ def make_graph(deps: Deps, checkpointer=None):
 
     def ops_agent(s: State) -> dict:
         t0 = time.monotonic()
-        tools = CaseTools(s["customer"], deps.ledger, deps.index, deps.llm, s["lang"], deps.now)
+        tools = CaseTools(s["customer"], deps.ledger, deps.index, deps.llm, s["lang"], deps.now,
+                          message=s["text"], clarified=bool(s.get("clarified")))
         steps: list[dict] = []
         spans: list[dict] = []
         msgs = [

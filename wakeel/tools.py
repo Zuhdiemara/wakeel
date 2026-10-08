@@ -11,10 +11,27 @@ Security comes from structure, not from prompts:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 from .ledger import Ledger, Txn
 from .rag import Index, rerank
+from .text import normalise
+
+# Arabic names customers use for the demo merchants.
+_ALIASES = {"jarir": ["جرير"], "noon": ["نون"], "nahdi": ["نهدي"], "starbucks": ["ستاربكس"], "amazon": ["امازون"],
+            "extra": ["اكسترا"], "hungerstation": ["هنقرستيشن", "هنقر"]}
+
+
+def mentions(text: str, merchant: str) -> bool:
+    """Whether the customer's text names this merchant (English or Arabic)."""
+    t = normalise(text)
+    for w in re.findall(r"[a-z]{4,}", merchant.lower()):
+        if w in ("bookstore", "pharmacy", "olaya", "electronics"):
+            continue
+        if w in t or any(normalise(a) in t for a in _ALIASES.get(w, [])):
+            return True
+    return False
 
 REPORT_DAYS = 60          # disputes §2
 AUTO_CAP_HALALAS = 500000  # disputes §7: 5,000 SAR per case
@@ -54,8 +71,10 @@ def duplicate_groups(txns: list[Txn]) -> list[list[Txn]]:
 
 
 class CaseTools:
-    def __init__(self, customer: str, ledger: Ledger, index: Index, rerank_llm=None, lang: str = "en", now: datetime | None = None):
+    def __init__(self, customer: str, ledger: Ledger, index: Index, rerank_llm=None, lang: str = "en", now: datetime | None = None,
+                 message: str | None = None, clarified: bool = False):
         self.customer, self.ledger, self.index, self.rerank_llm, self.lang = customer, ledger, index, rerank_llm, lang
+        self.message, self.clarified = message, clarified
         self.now = now or datetime.now(timezone.utc)
         self.proposal: dict | None = None
         self.question: dict | None = None
@@ -110,6 +129,14 @@ class CaseTools:
                 return {"error": "not a duplicate: no identical charge at this merchant within 24 hours (disputes#3)"}
             if dup[0].id == t.id:
                 return {"error": f"{t.id} is the original purchase; refund the duplicate {dup[1].id} instead (disputes#3)"}
+            # Never guess between merchants: if the customer named none and more
+            # than one duplicate qualifies, the agent must ask first.
+            if self.message is not None and not mentions(self.message, t.merchant):
+                eligible = [g for g in duplicate_groups(list(txns.values())) if (self.now - _when(g[0])).days <= REPORT_DAYS]
+                if len(eligible) > 1 and not self.clarified:
+                    return {"error": "ambiguous: several duplicates qualify and the customer did not name the merchant; "
+                                     "call ask_customer with the merchants as options",
+                            "options": [g[0].merchant for g in eligible]}
         if not policy_section.split(".w")[0].replace(".ar", "").startswith(("disputes#", "fees#")):
             return {"error": "cite the policy section that allows this refund"}
         self.proposal = {"transaction_id": t.id, "merchant": t.merchant, "amount": amount, "reason": reason,
