@@ -22,7 +22,7 @@ def index():
     return Index(load_corpus(ROOT / "corpus"))
 
 
-def scripted(ops_plan, reply_text="", supervisor_intent="duplicate_charge", fake_citation=True):
+def scripted(ops_plan, reply_text="", supervisor_intent="duplicate_charge", fake_citation=True, citation_shape=str):
     """A stand-in model that answers each node by recognising its system prompt.
     ops_plan: a list of tool-call lists, one per ReAct turn; then a summary."""
     turn = {"n": 0}
@@ -39,6 +39,8 @@ def scripted(ops_plan, reply_text="", supervisor_intent="duplicate_charge", fake
         if "ONLY the policy passages" in system:
             ids = [p["id"] for p in json.loads(msgs[1]["content"])["passages"]]
             cites = ["made_up#9"] + ids[:1] if fake_citation else ids[:1]
+            if citation_shape is dict:
+                cites = [{"id": c} for c in cites] + [42, None]
             return Reply(text=json.dumps({"answer": "Duplicate charges are refunded.", "citations": cites}))
         if "operations agent" in system:
             i = turn["n"]

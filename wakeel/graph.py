@@ -194,9 +194,12 @@ def make_graph(deps: Deps, checkpointer=None):
             {"role": "user", "content": json.dumps({"question": s["text"], "passages": passages}, ensure_ascii=False)}], json_mode=True)
         out = _json(rep.text) if rep else None
         if out and isinstance(out.get("citations"), list):
-            cited = [c for c in out["citations"] if c in ids]       # drop invented citations
+            # Models vary the shape ("disputes#3", {"id": "disputes#3"}, …):
+            # accept ids as strings or objects, drop anything else or invented.
+            raw = [c.get("id") or c.get("section") if isinstance(c, dict) else c for c in out["citations"]]
+            cited = [c for c in raw if isinstance(c, str) and c in ids]
             grounded = bool(cited)
-            answer = out.get("answer", "") if grounded else ""
+            answer = out.get("answer", "") if grounded and isinstance(out.get("answer"), str) else ""
         else:
             cited, grounded, answer = [], False, ""
         if not grounded and passages:                                # extractive fallback

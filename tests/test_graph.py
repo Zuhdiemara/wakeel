@@ -180,3 +180,10 @@ def test_rules_classify_when_the_model_abstains(make_agent):
     c = agent.start("sara", "طلبي من نون لم يصل")
     sup = next(t for t in c["trace"] if t["node"] == "supervisor")
     assert c["intent"] == "not_received" and sup["why"] == "rules (model said other)" and c["status"] != "handed_off"
+
+
+def test_citations_in_any_shape_never_crash(make_agent):
+    # Seen with the live model in CI: citations as objects crashed the policy agent.
+    agent, _ = make_agent(scripted([], citation_shape=dict, supervisor_intent="fee_question"))
+    c = agent.start("sara", "Why is there a foreign transaction fee?")
+    assert c["policy"]["citations"] and all(isinstance(x, str) and x != "made_up#9" for x in c["policy"]["citations"])
