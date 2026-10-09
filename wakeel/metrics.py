@@ -13,8 +13,22 @@ node_seconds = Histogram("wakeel_node_seconds", "Time per graph node", ["node"],
                          buckets=(.005, .02, .05, .1, .25, .5, 1, 2, 5, 10, 30))
 
 
+injection_flags = Counter("wakeel_injection_flags_total", "Messages the injection screens sent to a person", registry=registry)
+cross_checks = Counter("wakeel_cross_checks_total", "Cases where the rules raised a refund the model missed", registry=registry)
+rules_fallback = Counter("wakeel_rules_fallback_total", "Steps finished by rules because no model answered", ["node"], registry=registry)
+llm_errors = Counter("wakeel_llm_errors_total", "Model calls that failed (rate limits, outages, rejected requests)", registry=registry)
+
+
 def observe(spans: list[dict], steps: list[dict] | None = None) -> None:
     for s in spans:
+        if s["node"] == "intake" and s.get("injection"):
+            injection_flags.inc()
+        if s.get("cross_check"):
+            cross_checks.inc()
+        if s.get("mode") == "rules" or s.get("why") == "rules":
+            rules_fallback.labels(s["node"]).inc()
+        if s.get("llm_errors"):
+            llm_errors.inc(len(s["llm_errors"]))
         node_seconds.labels(s["node"]).observe(s.get("ms", 0) / 1000)
         if s.get("provider"):
             llm_calls.labels(s["provider"], s.get("model", "")).inc()

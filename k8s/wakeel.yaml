@@ -1,11 +1,15 @@
-# Wakeel on Kubernetes: two replicas behind a Service, health probes,
-# autoscaling on CPU, and model keys from a Secret (never in the image).
-#   kubectl create secret generic wakeel-keys --from-literal=GEMINI_API_KEY=... --from-literal=GROQ_API_KEY=...
+# Wakeel on Kubernetes, production topology:
+#   - the API (2+ replicas) queues cases (WAKEEL_QUEUE=1) and answers reviewers;
+#   - workers (python -m wakeel.worker) run queued cases;
+#   - all of them share one Postgres (WAKEEL_DATABASE_URL): checkpoints, case
+#     index, audit trail, rate limits and the job queue.
+# Configuration and keys come from the wakeel-keys Secret, never the image:
+#   kubectl create secret generic wakeel-keys \
+#     --from-literal=WAKEEL_DATABASE_URL=postgresql://... --from-literal=GROQ_API_KEY=... \
+#     --from-literal=CUSTOMER_ISSUER=... --from-literal=CUSTOMER_AUDIENCE=... --from-literal=CUSTOMER_JWKS_URL=... \
+#     --from-literal=STAFF_ISSUER=... --from-literal=STAFF_AUDIENCE=... --from-literal=STAFF_JWKS_URL=... \
+#     --from-literal=DAFTAR_URL=... --from-literal=DAFTAR_KEY=... --from-literal=WAKEEL_ENV=production
 #   kubectl apply -f k8s/wakeel.yaml
-#
-# Note: checkpoints, the case index and the audit trail are in SQLite on the
-# pod's volume. With more than one replica, use a shared database
-# (langgraph-checkpoint-postgres); see the README, "From demo to production".
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,12 +28,39 @@ spec:
           image: ghcr.io/zuhdiemara/wakeel:latest
           ports: [{ containerPort: 8000 }]
           envFrom: [{ secretRef: { name: wakeel-keys, optional: true } }]
+          env:
+            - { name: WAKEEL_QUEUE, value: "1" }
+            - { name: WAKEEL_WORKERS, value: "0" }          # the worker Deployment runs the queue
           readinessProbe: { httpGet: { path: /api/health, port: 8000 }, periodSeconds: 10 }
           livenessProbe: { httpGet: { path: /api/health, port: 8000 }, initialDelaySeconds: 20, periodSeconds: 20 }
           resources:
             requests: { cpu: 100m, memory: 256Mi }
             limits: { cpu: "1", memory: 512Mi }
           securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: false, capabilities: { drop: [ALL] } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wakeel-worker
+  labels: { app: wakeel-worker }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: wakeel-worker } }
+  template:
+    metadata:
+      labels: { app: wakeel-worker }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001 }
+      containers:
+        - name: worker
+          image: ghcr.io/zuhdiemara/wakeel:latest
+          command: ["python", "-m", "wakeel.worker"]
+          envFrom: [{ secretRef: { name: wakeel-keys, optional: true } }]
+          env: [{ name: WAKEEL_QUEUE, value: "1" }]
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
 ---
 apiVersion: v1
 kind: Service

@@ -36,7 +36,7 @@ BASE_URL = os.getenv("CREW_BASE_URL", "https://api.groq.com/openai/v1")
 def run_case(message: str, index: Index, llm: LLM) -> dict:
     text, _ = guards.redact(message)
     ledger = demo_ledger()
-    t = CaseTools("sara", ledger, index, None, "ar" if any("؀" <= c <= "ۿ" for c in text) else "en")
+    t = CaseTools("sara", ledger, index, None, "ar" if any("؀" <= c <= "ۿ" for c in text) else "en", message=text)  # the same tools and guards as Wakeel, including "never guess"
 
     @tool("search_policy")
     def search_policy(query: str) -> str:

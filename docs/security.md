@@ -15,9 +15,12 @@ How Wakeel handles each risk, and where the evidence is.
 | **LLM09 Misinformation** | Confident but wrong policy answers or amounts. | Answers must cite retrieved sections (invented citations are dropped, with an extractive fallback); calculations in code; numbers checked against facts. | evaluations, `test_model_flow…` |
 | **LLM10 Unbounded consumption** | A loop or an attacker runs up the model bill. | 10 cases a minute per address; at most 8 tool steps; a per-case token budget, after which rules finish the case; provider fallback instead of retry storms. | `test_a_runaway_tool_loop_stops_at_the_token_budget` |
 
+**Since added:**
+- customer and staff sign-in from the bank's identity providers (JWKS-verified tokens), with reviewer and supervisor roles;
+- four-eyes approval from 1,000 SAR;
+- security scanning in CI (dependencies, code, container).
+
 **Still to do for a real bank:**
-- reviewer SSO and roles;
-- signed approvals;
 - a classifier-based injection screen evaluated on a larger attack set;
 - red-team exercises in Arabic dialects;
 - the bank's model risk management review.

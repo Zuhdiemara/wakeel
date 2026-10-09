@@ -1,0 +1,52 @@
+# Prometheus alert rules for Wakeel. CI validates them with promtool.
+groups:
+  - name: wakeel-service
+    rules:
+      - alert: WakeelDown
+        expr: up{job="wakeel"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations: { summary: "Wakeel is not answering scrapes", runbook: "docs/runbook.md#wakeel-down" }
+      - alert: WakeelSlowSteps
+        expr: histogram_quantile(0.95, sum by (le, node) (rate(wakeel_node_seconds_bucket[5m]))) > 20
+        for: 10m
+        labels: { severity: ticket }
+        annotations: { summary: "p95 of step {{ $labels.node }} above 20 s", runbook: "docs/runbook.md#slow" }
+      - alert: WakeelQueueBacklog
+        expr: wakeel_jobs{state="queued"} > 50
+        for: 10m
+        labels: { severity: page }
+        annotations: { summary: "More than 50 cases waiting for a worker", runbook: "docs/runbook.md#backlog" }
+      - alert: WakeelDeadJobs
+        expr: wakeel_jobs{state="dead"} > 0
+        labels: { severity: ticket }
+        annotations: { summary: "A case failed 3 times and needs a person", runbook: "docs/runbook.md#dead-jobs" }
+  - name: wakeel-models
+    rules:
+      - alert: WakeelModelErrors
+        expr: rate(wakeel_llm_errors_total[10m]) > 0.2
+        for: 10m
+        labels: { severity: ticket }
+        annotations: { summary: "Model calls failing (quota, outage or rejected requests)", runbook: "docs/runbook.md#models" }
+      - alert: WakeelRunningOnRules
+        expr: increase(wakeel_rules_fallback_total[30m]) > 10
+        labels: { severity: page }
+        annotations: { summary: "Every model failed for many steps: the agent is running on rules", runbook: "docs/runbook.md#models" }
+      - alert: WakeelTokenSpend
+        expr: sum(increase(wakeel_llm_tokens_total[1h])) > 2e6
+        labels: { severity: ticket }
+        annotations: { summary: "More than 2M tokens in an hour: check for a loop or abuse", runbook: "docs/runbook.md#cost" }
+  - name: wakeel-safety
+    rules:
+      - alert: WakeelInjectionSpike
+        expr: increase(wakeel_injection_flags_total[1h]) > 20
+        labels: { severity: ticket }
+        annotations: { summary: "Many injection attempts in an hour: possible targeted attack", runbook: "docs/runbook.md#injection" }
+      - alert: WakeelModelMissingRefunds
+        expr: increase(wakeel_cross_checks_total[1d]) > 5
+        labels: { severity: ticket }
+        annotations: { summary: "The rules keep catching refunds the model missed: model quality may be drifting", runbook: "docs/runbook.md#drift" }
+      - alert: WakeelReviewersRejectingMany
+        expr: sum(increase(wakeel_decisions_total{approved="false"}[1d])) / clamp_min(sum(increase(wakeel_decisions_total[1d])), 1) > 0.2
+        labels: { severity: ticket }
+        annotations: { summary: "Reviewers reject more than 20% of proposals: the agent's proposals need review", runbook: "docs/runbook.md#drift" }

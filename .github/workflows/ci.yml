@@ -35,10 +35,18 @@ jobs:
       - run: docker build -t wakeel .
       - name: The container starts and answers
         run: |
-          docker run -d -p 8000:8000 --name wakeel-smoke wakeel
+          docker run -d -p 8000:8000 -e WAKEEL_QUEUE=1 -e WAKEEL_WORKERS=1 --name wakeel-smoke wakeel
           for i in $(seq 1 30); do curl -sf localhost:8000/api/health && break; sleep 1; done
-          curl -sf -X POST localhost:8000/api/cases -H 'content-type: application/json' \
-            -d '{"customer":"sara","message":"I was charged twice at Jarir Bookstore"}' | grep -q awaiting_approval
+          tok=$(curl -sf -X POST localhost:8000/api/demo/token -H 'content-type: application/json' -d '{"kind":"customer","subject":"sara"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
+          cid=$(curl -sf -X POST localhost:8000/api/cases -H "authorization: Bearer $tok" -H 'content-type: application/json' \
+            -d '{"message":"I was charged twice at Jarir Bookstore"}' | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='queued', d; print(d['case_id'])")
+          echo "queued $cid; waiting for a worker pod"
+          for i in $(seq 1 60); do
+            st=$(curl -sf localhost:8000/api/me/cases/$cid -H "authorization: Bearer $tok" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
+            [ "$st" = "awaiting_approval" ] && echo "a worker pod ran it: $st" && break
+            sleep 2
+          done
+          [ "$st" = "awaiting_approval" ] || { docker logs wakeel-smoke --tail 50; exit 1; }
       - if: github.ref == 'refs/heads/main'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -64,19 +72,38 @@ jobs:
           kubectl expose deployment jaeger --name=jaeger --port=4318 --target-port=4318
           kubectl expose deployment jaeger --name=jaeger-query --port=16686 --target-port=16686
           kubectl rollout status deployment/jaeger --timeout=180s
-      - name: Deploy Wakeel with the manifests
+      - name: Postgres in the cluster (shared by every API and worker pod)
         run: |
-          kubectl create secret generic wakeel-keys --from-literal=OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+          kubectl create deployment postgres --image=postgres:17 --port=5432
+          kubectl set env deployment/postgres POSTGRES_PASSWORD=wakeel POSTGRES_DB=wakeel
+          kubectl expose deployment postgres --port=5432
+          kubectl rollout status deployment/postgres --timeout=180s
+          for i in $(seq 1 30); do kubectl exec deploy/postgres -- pg_isready -U postgres && break; sleep 2; done
+      - name: Deploy Wakeel with the manifests (API and workers)
+        run: |
+          kubectl create secret generic wakeel-keys \
+            --from-literal=OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 \
+            --from-literal=WAKEEL_DATABASE_URL=postgresql://postgres:wakeel@postgres:5432/wakeel \
+            --from-literal=WAKEEL_DEMO=1
           sed 's#image: ghcr.io/zuhdiemara/wakeel:latest#image: wakeel:ci\n          imagePullPolicy: Never#' k8s/wakeel.yaml | kubectl apply -f -
-          kubectl rollout status deployment/wakeel --timeout=180s
+          kubectl rollout status deployment/wakeel --timeout=240s
+          kubectl rollout status deployment/wakeel-worker --timeout=240s
           kubectl get pods -o wide
       - name: A case through the Service, then its trace in Jaeger
         run: |
           kubectl port-forward service/wakeel 8000:80 > /dev/null 2>&1 &
           kubectl port-forward service/jaeger-query 16686:16686 > /dev/null 2>&1 &
           for i in $(seq 1 30); do curl -sf localhost:8000/api/health && break; sleep 1; done
-          curl -sf -X POST localhost:8000/api/cases -H 'content-type: application/json' \
-            -d '{"customer":"sara","message":"I was charged twice at Jarir Bookstore"}' | grep -q awaiting_approval
+          tok=$(curl -sf -X POST localhost:8000/api/demo/token -H 'content-type: application/json' -d '{"kind":"customer","subject":"sara"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['token'])")
+          cid=$(curl -sf -X POST localhost:8000/api/cases -H "authorization: Bearer $tok" -H 'content-type: application/json' \
+            -d '{"message":"I was charged twice at Jarir Bookstore"}' | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['status']=='queued', d; print(d['case_id'])")
+          echo "queued $cid; waiting for a worker pod"
+          for i in $(seq 1 60); do
+            st=$(curl -sf localhost:8000/api/me/cases/$cid -H "authorization: Bearer $tok" | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])")
+            [ "$st" = "awaiting_approval" ] && echo "a worker pod ran it: $st" && break
+            sleep 2
+          done
+          [ "$st" = "awaiting_approval" ] || { kubectl logs deploy/wakeel-worker --tail=50; exit 1; }
           curl -sf localhost:8000/metrics | grep -q wakeel_node_seconds_bucket
           # Jaeger v2's query API (v3): the service appears once spans arrive;
           # then count the spans of its recent traces (OTLP JSON).
@@ -91,3 +118,69 @@ jobs:
           echo "--- services:"; curl -s localhost:16686/api/v3/services | head -c 300; echo
           kubectl logs deployment/jaeger --tail=30
           echo "no trace reached Jaeger"; kubectl logs deployment/wakeel --tail=50; exit 1
+
+  # Security: known-vulnerable dependencies, risky code patterns, and the
+  # container image (OS packages and libraries), on every push.
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - run: pip install pip-audit bandit
+      - name: Dependencies (pip-audit)
+        run: pip-audit -r requirements.txt --progress-spinner off
+      - name: Code (bandit, medium severity and up)
+        run: bandit -q -r wakeel -ll
+      - name: Alert rules are valid (promtool)
+        run: docker run --rm -v "$PWD/ops:/ops" --entrypoint promtool prom/prometheus:latest check rules /ops/alerts.yml
+      - name: Dashboard is valid JSON with every panel querying a Wakeel metric
+        run: python3 -c "import json; d=json.load(open('ops/grafana-dashboard.json')); assert all('wakeel_' in t['expr'] for p in d['panels'] for t in p['targets']); print(len(d['panels']), 'panels')"
+      - name: Container image (Trivy, fixable high and critical)
+        run: |
+          docker build -t wakeel:scan .
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress wakeel:scan
+
+  # Load: 20 concurrent customers for 20 s against the real server (rules
+  # mode), with a check that no duplicate is ever refunded twice.
+  load:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13", cache: pip }
+      - run: pip install -r requirements.txt
+      - run: |
+          WAKEEL_CASES_PER_MINUTE=100000 uvicorn wakeel.api:app --port 8000 > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8000/api/health > /dev/null && break; sleep 1; done
+          python scripts/loadtest.py http://localhost:8000 --customers 20 --seconds 20 | tee load.json
+          { echo "### Load test (rules mode)"; echo '```'; cat load.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  # Backup and restore drill on Postgres: real cases, pg_dump, restore into a
+  # new database, then the audit chain recomputes and a case that was waiting
+  # for approval resumes from its restored checkpoint and completes.
+  restore-drill:
+    needs: test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: wakeel }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13", cache: pip }
+      - run: pip install -r requirements.txt
+      - run: |
+          SRC=postgresql://postgres:postgres@localhost:5432/wakeel
+          out=$(python scripts/restore_drill.py prepare $SRC | tail -1); echo "$out"
+          cid=$(echo "$out" | python3 -c "import json,sys; print(json.load(sys.stdin)['waiting'])")
+          pg=$(docker ps -qf ancestor=postgres:17)
+          docker exec $pg pg_dump -U postgres -Fc wakeel > wakeel.dump
+          docker exec $pg createdb -U postgres wakeel_restored
+          docker exec -i $pg pg_restore -U postgres --no-owner -d wakeel_restored < wakeel.dump
+          python scripts/restore_drill.py verify postgresql://postgres:postgres@localhost:5432/wakeel_restored $cid

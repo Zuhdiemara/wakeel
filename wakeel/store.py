@@ -59,6 +59,10 @@ create trigger audit_append_only before update or delete on audit for each row e
 
 AUDIT_RETENTION = timedelta(days=5 * 365)
 
+_CLAIM_SQLITE = """select id, case_id, kind, payload, attempts from jobs
+    where state in ('queued', 'running') and run_at <= ? order by run_at limit 1"""
+_CLAIM_PG = _CLAIM_SQLITE + " for update skip locked"   # two fixed statements, no runtime SQL building
+
 
 class Store:
     """Use Store.sqlite(path) or Store.postgres(pool)."""
@@ -222,10 +226,7 @@ class Store:
         after its lease runs out."""
         now = time.time()
         with self._tx() as cur:
-            lock = " for update skip locked" if self.kind == "postgres" else ""
-            r = cur.execute("""select id, case_id, kind, payload, attempts from jobs
-                where state in ('queued', 'running') and run_at <= ?
-                order by run_at limit 1""" + lock, (now,)).fetchone()
+            r = cur.execute(_CLAIM_PG if self.kind == "postgres" else _CLAIM_SQLITE, (now,)).fetchone()
             if not r:
                 return None
             cur.execute("update jobs set state = 'running', locked_by = ?, attempts = attempts + 1, run_at = ? where id = ?",

@@ -134,7 +134,7 @@ Hybrid is not automatically better. With strong embeddings, every bit of BM25 we
 
 **Reply quality:** `python -m evals.judge` has a model grade each final reply (grounded in the facts, in the customer's language, tone) from 1 to 5 with a reason, and lists replies to review. A judge is itself a model: compare its grades with a person's on a sample before trusting it.
 
-**Choosing a framework, measured:** [`crew/dispute_crew.py`](crew/dispute_crew.py) builds the same task with CrewAI, using the same tools and code-level guards, and scores it on the same cases and attacks (its own workflow, each morning on a fresh free quota and on demand, with the `GROQ_API_KEY` secret). The difference is who decides the flow: a crew of role-based agents, or LangGraph code. CrewAI also has no durable pause for a customer's answer or a reviewer's approval. The point is to compare from data, not opinion.
+**Choosing a framework, measured:** CrewAI on the same model (gpt-oss-20b), first valid run: 12/16 decisions, 0 unsafe outcomes from attacks, median 21.0 s, against Wakeel's 16/16 and 8.9 s. That run had one wrong refund, because my CrewAI version wasn't yet giving the shared tools the customer's message, which the "never guess" guard needs; fixed, and re-run daily. Its other misses were cases Wakeel's code-level routing and rules cross-check catch. [`crew/dispute_crew.py`](crew/dispute_crew.py) builds the same task with CrewAI, using the same tools and code-level guards, and scores it on the same cases and attacks (its own workflow, each morning on a fresh free quota and on demand, with the `GROQ_API_KEY` secret). The difference is who decides the flow: a crew of role-based agents, or LangGraph code. CrewAI also has no durable pause for a customer's answer or a reviewer's approval. The point is to compare from data, not opinion.
 
 **Choosing a model, measured:** `python -m evals.compare` runs the same cases and attacks on each configured provider on its own, and reports intent and decision accuracy, wrong refunds, unsafe outcomes, p50 and p95 latency, tokens per case, and how often each fell back to rules. Model choice is a measured trade-off, made per task.
 
@@ -159,6 +159,32 @@ python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 python scripts/seed_daftar.py http://localhost:8080   # prints DAFTAR_URL and DAFTAR_KEY
 DAFTAR_TEST_URL=http://localhost:8080 python -m pytest tests/test_daftar.py
 ```
+
+## Production readiness
+
+What a bank needs before go-live, and where each piece is in the code. Every row is tested, most of them in CI on every push.
+
+| | What | Evidence |
+|---|---|---|
+| **Shared state** | Checkpoints, case index, audit trail, rate limits and the job queue in Postgres (`WAKEEL_DATABASE_URL`); SQLite for a single-process demo | Two "replicas" on one database: a case opened on A is approved on B; 10 split approvals pay once; no queued job is taken twice (`tests/test_postgres.py`) |
+| **Customer sign-in** | The customer is the subject of a token from the bank's login, verified against its JWKS (signature, issuer, audience, expiry); never a request field | Forged, expired, foreign and wrong-audience tokens refused (`tests/test_auth.py`); a customer can't read another's case (404) |
+| **Staff sign-in and roles** | Reviewer and supervisor roles from the staff identity provider (for example Entra ID); the reviewer on a decision is the signed-in person | Customers can't use staff routes; reviewers can't run supervisor actions (`tests/test_api.py`) |
+| **Four-eyes approval** | From 1,000 SAR, two different reviewers must approve; one rejection rejects; the same reviewer twice counts once | Tests, and live on the demo page |
+| **Job queue** | `WAKEEL_QUEUE=1`: cases are queued (202) and run by workers (in-process, or `python -m wakeel.worker` pods), with retries, backoff and audited dead jobs | CI deploys API pods, worker pods and Postgres on Kubernetes; a queued case is run by a worker pod |
+| **Shared rate limits** | Cases per minute per customer, counted in the shared store | `tests/test_postgres.py`, `tests/test_api.py` |
+| **Retention (PDPL)** | Case data deleted 90 days after closing; audit entries purged after 5 years; supervisors can erase a customer's cases on request; the audit chain stays valid | `tests/test_api.py` |
+| **Security scanning** | pip-audit (dependencies), bandit (code), Trivy (container image) on every push | CI `security` job |
+| **Alerts and dashboard** | Prometheus rules for downtime, slowness, backlog, dead jobs, model failure, cost, injection spikes and model drift (`ops/alerts.yml`), each linked to the [runbook](docs/runbook.md); a Grafana dashboard (`ops/grafana-dashboard.json`) | promtool validates the rules in CI |
+| **Load** | 20 concurrent customers against the real server, in rules mode, which measures the service itself | **169 cases a second, p50 117 ms, p95 178 ms, 0 errors**; 1,693 proposals for the same duplicate paid it **once** (`scripts/loadtest.py`, CI `load` job) |
+| **Backup and restore** | `pg_dump` into a new database; the restored copy must work, not merely exist | 3 cases restored, audit chain recomputed (8 entries), and a case waiting for approval **resumed from its restored checkpoint and was refunded** (`scripts/restore_drill.py`, CI `restore-drill` job) |
+| **Safe configuration** | `WAKEEL_ENV=production` refuses to start with demo sign-in, without Postgres, without the identity providers, with the demo ledger, or with localhost addresses | `tests/test_api.py` |
+
+**What only a real client can provide:**
+- the bank's systems (core banking, its refund API, its identity providers);
+- AI models hosted in the Kingdom for data residency;
+- anonymised real cases and shadow mode with its staff;
+- formal approvals: model risk management, SAMA outsourcing requirements, the security review and an independent penetration test;
+- paid model capacity in place of free tiers.
 
 ## Documents
 
