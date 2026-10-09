@@ -388,9 +388,12 @@ class Agent:
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
 
-    def _lock(self, case_id: str) -> threading.Lock:
-        """One decision at a time per case in this process. Across processes
-        the ledger's idempotency key is the backstop: a second resume replays."""
+    def _lock(self, case_id: str):
+        """One decision at a time per case: across every replica with a
+        Postgres store (advisory lock), in this process otherwise. The ledger's
+        idempotency key stays the backstop: a second resume replays."""
+        if self.store is not None:
+            return self.store.case_lock(case_id)
         with self._locks_guard:
             return self._locks.setdefault(case_id, threading.Lock())
 

@@ -14,7 +14,7 @@ def test_a_case_awaiting_approval_survives_a_restart(index, tmp_path):
 
     def agent():
         return Agent(Deps(None, index, ledger), checkpointer=SqliteSaver(sqlite3.connect(db, check_same_thread=False)),
-                     store=Store(sqlite3.connect(db, check_same_thread=False)))
+                     store=Store.sqlite(db))
 
     first = agent()
     c = first.start("sara", "I was charged twice at Jarir Bookstore")
@@ -31,7 +31,7 @@ def test_a_case_awaiting_approval_survives_a_restart(index, tmp_path):
 
 def test_the_audit_trail_is_append_only_and_tamper_evident(index, tmp_path):
     db = str(tmp_path / "a.db")
-    s = Store(sqlite3.connect(db))
+    s = Store.sqlite(db)
     for i in range(3):
         s.audit(f"case_{i}", "reviewer:x", "approved")
     raw = sqlite3.connect(db)
@@ -44,7 +44,7 @@ def test_the_audit_trail_is_append_only_and_tamper_evident(index, tmp_path):
     raw.execute("drop trigger audit_append_only_u")
     raw.execute("update audit set actor = 'reviewer:y' where seq = 2")
     raw.commit()
-    assert Store(sqlite3.connect(db)).verify() == {"ok": False, "entries": 3, "broken_at": 2}
+    assert Store.sqlite(db).verify() == {"ok": False, "entries": 3, "broken_at": 2}
 
 
 def test_streaming_queue_metrics_and_audit_over_http(tmp_path, monkeypatch):

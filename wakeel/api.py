@@ -32,6 +32,26 @@ ROOT = Path(__file__).resolve().parent.parent
 DEMO_CUSTOMERS = {"sara": "Sara (charged twice at Jarir)", "omar": "Omar (another customer)"}
 
 
+def open_state(db_path: str | None = None):
+    """Checkpoints and the store: Postgres when WAKEEL_DATABASE_URL is set
+    (several replicas share it), SQLite otherwise (one process)."""
+    url = os.getenv("WAKEEL_DATABASE_URL")
+    if url and not db_path:
+        from langgraph.checkpoint.postgres import PostgresSaver
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+        pool = ConnectionPool(url, min_size=1, max_size=int(os.getenv("WAKEEL_DB_POOL", "10")), open=True,
+                              kwargs={"autocommit": True, "prepare_threshold": None, "row_factory": dict_row})
+        saver = PostgresSaver(pool)
+        saver.setup()
+        plain = ConnectionPool(url, min_size=1, max_size=int(os.getenv("WAKEEL_DB_POOL", "10")), open=True, kwargs={"autocommit": True})
+        return saver, Store.postgres(plain)
+    path = db_path or os.getenv("WAKEEL_DB", str(ROOT / ".data" / "wakeel.db"))
+    if path != ":memory:":
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    return SqliteSaver(sqlite3.connect(path, check_same_thread=False)), Store.sqlite(path)
+
+
 def build(db_path: str | None = None) -> tuple[Agent, dict]:
     """db_path: SQLite file for checkpoints, the case index and the audit trail
     (WAKEEL_DB, default .data/wakeel.db). Cases awaiting approval survive a
@@ -48,11 +68,7 @@ def build(db_path: str | None = None) -> tuple[Agent, dict]:
         model = None                                    # no keys: rules mode
     ledger = DaftarLedger(os.environ["DAFTAR_URL"], os.environ["DAFTAR_KEY"]) if os.getenv("DAFTAR_URL") else demo_ledger()
     index = Index(load_corpus(ROOT / "corpus"), embedder_from_env())
-    path = db_path or os.getenv("WAKEEL_DB", str(ROOT / ".data" / "wakeel.db"))
-    if path != ":memory:":
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, check_same_thread=False)
-    store = Store(sqlite3.connect(path, check_same_thread=False))
+    checkpointer, store = open_state(db_path)
 
     tracer = otel.setup()
 
@@ -66,7 +82,7 @@ def build(db_path: str | None = None) -> tuple[Agent, dict]:
             metrics.cases.labels(case.get("status", "?"), case.get("intent", "?")).inc()
 
     info.update({"models": model.name if model else "none (rules mode)", "embeddings": index.embedder.name,
-                 "ledger": "daftar" if os.getenv("DAFTAR_URL") else "in-memory demo", "chunks": len(index.chunks), "state": "sqlite",
+                 "ledger": "daftar" if os.getenv("DAFTAR_URL") else "in-memory demo", "chunks": len(index.chunks), "state": store.kind,
                  "tracing": "otlp" if tracer else "off"})
     import hashlib
     corpus_version = hashlib.sha256("".join(c.text for c in index.chunks).encode()).hexdigest()[:12]
@@ -74,7 +90,7 @@ def build(db_path: str | None = None) -> tuple[Agent, dict]:
     info["cache"] = {"corpus_version": corpus_version}
     guard = guards.guard_from_env()
     info["injection_screen"] = "patterns + prompt guard" if guard else "patterns"
-    return Agent(Deps(model, index, ledger, cache=cache, guard=guard), checkpointer=SqliteSaver(conn), store=store, on_spans=on_spans), info
+    return Agent(Deps(model, index, ledger, cache=cache, guard=guard), checkpointer=checkpointer, store=store, on_spans=on_spans), info
 
 
 agent, info = build()
