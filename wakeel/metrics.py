@@ -22,3 +22,13 @@ def observe(spans: list[dict], steps: list[dict] | None = None) -> None:
             tokens.labels(s["provider"], "out").inc(s.get("tokens_out", 0))
     for st in steps or []:
         tool_calls.labels(st["tool"], str("error" not in (st.get("result") or {})).lower()).inc()
+
+from prometheus_client import Gauge
+
+jobs = Gauge("wakeel_jobs", "Queued work by state", ["state"], registry=registry)
+jobs_done = Counter("wakeel_jobs_finished_total", "Jobs finished, retried or dead", ["state"], registry=registry)
+
+
+def jobs_state(counts: dict) -> None:
+    for s in ("queued", "running", "done", "dead"):
+        jobs.labels(s).set(counts.get(s, 0))

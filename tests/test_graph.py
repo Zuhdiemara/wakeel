@@ -187,3 +187,29 @@ def test_citations_in_any_shape_never_crash(make_agent):
     agent, _ = make_agent(scripted([], citation_shape=dict, supervisor_intent="fee_question"))
     c = agent.start("sara", "Why is there a foreign transaction fee?")
     assert c["policy"]["citations"] and all(isinstance(x, str) and x != "made_up#9" for x in c["policy"]["citations"])
+
+
+def test_large_refunds_need_two_different_reviewers(index):
+    from wakeel.graph import Agent, Deps
+    from wakeel.ledger import demo_ledger
+    ledger = demo_ledger()
+    agent = Agent(Deps(None, index, ledger))
+    c = agent.start("omar", "Extra Electronics charged me twice")          # 4,599.00 SAR
+    assert c["proposal"]["amount"] == 459900
+    c = agent.decide(c["case_id"], True, "noura")
+    assert c["status"] == "awaiting_approval" and c["approvals"] == ["noura"] and ledger.refund_calls == 0
+    c = agent.decide(c["case_id"], True, "noura")                           # the same person again: still one
+    assert c["status"] == "awaiting_approval" and c["approvals"] == ["noura"] and ledger.refund_calls == 0
+    c = agent.decide(c["case_id"], True, "fahad")
+    assert c["status"] == "refunded" and c["decision"]["reviewers"] == ["noura", "fahad"] and ledger.refund_calls == 1
+
+
+def test_one_rejection_rejects_a_large_refund(index):
+    from wakeel.graph import Agent, Deps
+    from wakeel.ledger import demo_ledger
+    ledger = demo_ledger()
+    agent = Agent(Deps(None, index, ledger))
+    c = agent.start("omar", "Extra Electronics charged me twice")
+    agent.decide(c["case_id"], True, "noura")
+    c = agent.decide(c["case_id"], False, "fahad", "needs the receipt")
+    assert c["status"] == "rejected" and ledger.refund_calls == 0

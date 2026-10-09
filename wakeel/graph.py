@@ -60,7 +60,8 @@ class State(TypedDict, total=False):
     proposal: dict | None
     question: dict | None      # a clarifying question for the customer
     clarified: bool
-    decision: dict | None
+    decision: dict | None      # final: approved by enough reviewers, or rejected
+    approvals: list            # reviewers who approved so far (four-eyes)
     refund: dict | None
     reply: str
     status: str                # running, awaiting_approval, refunded, rejected, answered, handed_off
@@ -76,6 +77,7 @@ class Deps:
     token_budget: int = 30000      # per case; past it, the tool loop stops and rules finish the case
     cache: Any = None              # a SemanticCache for policy answers, or None
     guard: Any = None              # a classifier screen (guards.PromptGuard), or None
+    dual_approval_halalas: int = 100000   # at or above 1,000 SAR, two different reviewers must approve
 
 
 def _span(node: str, t0: float, rep: Reply | None = None, **extra) -> dict:
@@ -291,12 +293,25 @@ def make_graph(deps: Deps, checkpointer=None):
                 "trace": [_span("clarify", t0, pii=pii)]}
 
     def approval(s: State) -> dict:
+        """Pauses until a reviewer decides. Large refunds need two different
+        reviewers (four-eyes); one rejection rejects. The same reviewer
+        approving twice counts once."""
         t0 = time.monotonic()
-        decision = interrupt({"case_id": s["case_id"], "proposal": s["proposal"]})   # pauses until a human answers
-        ok = bool(decision.get("approved"))
-        return {"decision": {"approved": ok, "reviewer": str(decision.get("reviewer", ""))[:60], "note": str(decision.get("note", ""))[:300]},
-                "status": "running" if ok else "rejected",
-                "trace": [_span("approval", t0, approved=ok, reviewer=decision.get("reviewer"))]}
+        approvals = list(s.get("approvals") or [])
+        required = 2 if s["proposal"]["amount"] >= deps.dual_approval_halalas else 1
+        decision = interrupt({"case_id": s["case_id"], "proposal": s["proposal"], "approvals": approvals, "required": required})
+        reviewer, note = str(decision.get("reviewer", ""))[:60], str(decision.get("note", ""))[:300]
+        if not decision.get("approved"):
+            return {"decision": {"approved": False, "reviewers": approvals + [reviewer], "reviewer": reviewer, "note": note},
+                    "status": "rejected", "trace": [_span("approval", t0, approved=False, reviewer=reviewer, required=required)]}
+        duplicate = reviewer in approvals
+        if not duplicate:
+            approvals.append(reviewer)
+        out: dict = {"approvals": approvals, "trace": [_span("approval", t0, approved=True, reviewer=reviewer, count=len(approvals),
+                                                              required=required, duplicate=duplicate)]}
+        if len(approvals) >= required:
+            out.update(decision={"approved": True, "reviewers": approvals, "reviewer": approvals[-1], "note": note}, status="running")
+        return out
 
     def execute(s: State) -> dict:
         t0 = time.monotonic()
@@ -413,9 +428,9 @@ class Agent:
             elif s["node"] == "ops_agent" and c.get("proposal"):
                 p = c["proposal"]
                 self.store.audit(c["case_id"], "agent", "refund_proposed", {k: p[k] for k in ("transaction_id", "amount", "reason", "policy_section")})
-            elif s["node"] == "approval":
-                d = c.get("decision") or {}
-                self.store.audit(c["case_id"], "reviewer:" + d.get("reviewer", "?"), "approved" if d.get("approved") else "rejected", {"note": d.get("note", "")})
+            elif s["node"] == "approval" and not s.get("duplicate"):
+                detail = {"approvals": f'{s.get("count", 0)} of {s.get("required", 1)}'} if s.get("approved") else {"note": (c.get("decision") or {}).get("note", "")}
+                self.store.audit(c["case_id"], "reviewer:" + str(s.get("reviewer", "?")), "approved" if s.get("approved") else "rejected", detail)
             elif s["node"] == "execute":
                 r = c.get("refund") or {}
                 self.store.audit(c["case_id"], "system", "refund_executed" if r.get("ok") else "refund_failed", {"amount": r.get("amount"), "ref": r.get("ref"), "replayed": r.get("replayed"), "key": s.get("key")})

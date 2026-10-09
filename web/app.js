@@ -30,23 +30,30 @@ function applyLang() {
   $("#lang").textContent = t("lang");
 }
 
-async function api(method, path, body) {
-  const r = await fetch(path, {method, headers: {"Content-Type": "application/json"}, body: body ? JSON.stringify(body) : undefined});
+const tok = {customer: null, staff: null, staffRoles: []};
+async function signIn(kind, subject) {
+  tok[kind] = (await api("POST", "/api/demo/token", {kind, subject})).token;
+}
+async function api(method, path, body, as) {
+  const headers = {"Content-Type": "application/json"};
+  if (as && tok[as]) headers.Authorization = "Bearer " + tok[as];
+  const r = await fetch(path, {method, headers, body: body ? JSON.stringify(body) : undefined});
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.detail || j.error || r.statusText);
   return j;
 }
 
 async function queue() {
-  const q = (await api("GET", "/api/cases?status=awaiting_approval")).cases;
+  const q = (await api("GET", "/api/cases?status=awaiting_approval", null, "staff")).cases;
   $("#queue").innerHTML = q.length ? q.map(c => `<li><code>${esc(c.case_id)}</code> · ${esc(c.customer)} · ${sar(c.amount || 0)}<button type="button" data-open="${esc(c.case_id)}">${t("open")}</button></li>`).join("") : `<li class="muted">${t("empty")}</li>`;
-  $("#queue").querySelectorAll("[data-open]").forEach(b => b.onclick = async () => render(await api("GET", "/api/cases/" + b.dataset.open)));
+  $("#queue").querySelectorAll("[data-open]").forEach(b => b.onclick = async () => render(await api("GET", "/api/cases/" + b.dataset.open, null, "staff")));
 }
 
 async function audit(caseId) {
-  const [a, v] = await Promise.all([api("GET", `/api/cases/${caseId}/audit`), api("GET", "/api/audit/verify")]);
+  const a = await api("GET", `/api/cases/${caseId}/audit`, null, "staff");
+  const v = await api("GET", "/api/audit/verify", null, "staff").catch(() => null);   // supervisors only
   $("#audit").innerHTML = a.audit.map(e => `<li><b>${esc(e.action)}</b> · ${esc(e.actor)} · <span class="muted">${esc(e.at.slice(11, 19))} · #${esc(e.hash)}</span></li>`).join("");
-  $("#auditOk").innerHTML = v.ok ? `<span class="pill ok">${t("chain")}</span> · ${v.entries}` : `<span class="pill bad">${t("broken")} ${v.broken_at}</span>`;
+  $("#auditOk").innerHTML = !v ? `<span class="muted">${L === "ar" ? "التحقق من السلسلة للمشرفين" : "Chain check: supervisors only"}</span>` : v.ok ? `<span class="pill ok">${t("chain")}</span> · ${v.entries}` : `<span class="pill bad">${t("broken")} ${v.broken_at}</span>`;
 }
 
 async function boot() {
@@ -54,17 +61,20 @@ async function boot() {
   $("#lang").onclick = () => { L = L === "en" ? "ar" : "en"; try { localStorage.setItem("wakeel-lang", L); } catch (e) {} applyLang(); queue(); };
   const h = await api("GET", "/api/health");
   $("#health").textContent = `models: ${h.models} · embeddings: ${h.embeddings} · ledger: ${h.ledger}`;
-  const cs = await api("GET", "/api/customers");
-  $("#customer").innerHTML = Object.entries(cs).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+  const people = await api("GET", "/api/demo/people");
+  $("#customer").innerHTML = Object.entries(people.customers).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+  $("#staff").innerHTML = Object.entries(people.staff).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+  await Promise.all([signIn("customer", $("#customer").value), signIn("staff", $("#staff").value)]);
+  $("#staff").onchange = async () => { await signIn("staff", $("#staff").value); queue(); if (current) render(await api("GET", "/api/cases/" + current.case_id, null, "staff")); };
   $("#examples").innerHTML = EXAMPLES.map(e => `<button type="button" dir="auto">${esc(e)}</button>`).join("");
   $("#examples").querySelectorAll("button").forEach(b => b.onclick = () => { $("#msg").value = b.textContent; $("#msg").focus(); });
-  $("#customer").onchange = txns;
+  $("#customer").onchange = async () => { await signIn("customer", $("#customer").value); txns(); };
   await txns();
   await queue();
 }
 
 async function txns() {
-  const t = (await api("GET", `/api/customers/${$("#customer").value}/transactions`)).transactions;
+  const t = (await api("GET", "/api/me/transactions", null, "customer")).transactions;
   $("#txns").innerHTML = `<tr><th>ID</th><th>Merchant</th><th class="num">Amount</th><th>Date</th><th class="num">Refunded</th></tr>` +
     t.map(x => `<tr><td>${esc(x.id)}</td><td>${esc(x.merchant)}</td><td class="num">${sar(x.amount)}</td><td>${esc(x.at.slice(0, 10))}</td><td class="num">${x.refunded ? sar(x.refunded) : ""}</td></tr>`).join("");
 }
@@ -98,7 +108,8 @@ function render(c) {
     r.innerHTML = `<b>${esc(c.question.question)}</b><div class="chips" style="margin-top:8px">${(c.question.options || []).map(o => `<button type="button" data-answer="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
     r.querySelectorAll("[data-answer]").forEach(b => b.onclick = async () => {
       r.querySelectorAll("button").forEach(x => x.disabled = true);
-      render(await api("POST", `/api/cases/${c.case_id}/reply`, {message: b.dataset.answer}));
+      await api("POST", `/api/me/cases/${c.case_id}/reply`, {message: b.dataset.answer}, "customer");
+      render(await api("GET", "/api/cases/" + c.case_id, null, "staff"));
     });
   } else {
     r.hidden = !c.reply;
@@ -108,12 +119,12 @@ function render(c) {
   if (c.status === "awaiting_approval" && p) {
     $("#review").innerHTML = `<p>The agent proposes a refund. Nothing moves until you decide.</p>
       <dl class="kv"><dt>Customer</dt><dd>${esc(c.customer)}</dd><dt>Transaction</dt><dd>${esc(p.transaction_id)} · ${esc(p.merchant)}</dd>
-      <dt>Amount</dt><dd><b>${sar(p.amount)}</b></dd><dt>Reason</dt><dd>${esc(p.reason)}</dd><dt>Policy</dt><dd>${esc(p.policy_section)}</dd>${p.source ? `<dt>Note</dt><dd><span class="pill warn">${esc(p.source)}</span></dd>` : ""}</dl>
+      <dt>Amount</dt><dd><b>${sar(p.amount)}</b></dd><dt>Reason</dt><dd>${esc(p.reason)}</dd><dt>Policy</dt><dd>${esc(p.policy_section)}</dd>${p.amount >= 100000 ? `<dt>Approvals</dt><dd><span class="pill warn">${(c.approvals || []).length} of 2</span> ${esc((c.approvals || []).join(", "))}</dd>` : ""}${p.source ? `<dt>Note</dt><dd><span class="pill warn">${esc(p.source)}</span></dd>` : ""}</dl>
       <div class="row"><button class="primary" id="approve">Approve refund</button><button class="bad" id="reject">Reject</button></div>`;
     $("#approve").onclick = () => decide(true);
     $("#reject").onclick = () => decide(false);
   } else if (c.refund) {
-    $("#review").innerHTML = `<span class="pill ${c.refund.ok ? "ok" : "bad"}">${c.refund.ok ? "refunded" : "failed"}</span> ${sar(c.refund.amount)} · ref ${esc(c.refund.ref || c.refund.error)}<br><span class="muted">Approved by ${esc(c.decision?.reviewer)}. Idempotency key in the trace: a repeat would not pay twice.</span>`;
+    $("#review").innerHTML = `<span class="pill ${c.refund.ok ? "ok" : "bad"}">${c.refund.ok ? "refunded" : "failed"}</span> ${sar(c.refund.amount)} · ref ${esc(c.refund.ref || c.refund.error)}<br><span class="muted">Approved by ${esc((c.decision?.reviewers || [c.decision?.reviewer]).join(" and "))}. Idempotency key in the trace: a repeat would not pay twice.</span>`;
   } else if (c.decision && !c.decision.approved) {
     $("#review").innerHTML = `<span class="pill bad">rejected</span> by ${esc(c.decision.reviewer)}. No money moved.`;
   } else {
@@ -123,13 +134,13 @@ function render(c) {
 
 async function decide(approved) {
   document.querySelectorAll("#review button").forEach(b => b.disabled = true);
-  render(await api("POST", `/api/cases/${current.case_id}/decision`, {approved, reviewer: "demo.reviewer"}));
+  render(await api("POST", `/api/cases/${current.case_id}/decision`, {approved}, "staff"));
   await txns();
 }
 
 // Streams the agent's steps as they finish (server-sent events over a POST).
 async function streamCase(body) {
-  const r = await fetch("/api/cases/stream", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const r = await fetch("/api/cases/stream", {method: "POST", headers: {"Content-Type": "application/json", Authorization: "Bearer " + tok.customer}, body: JSON.stringify(body)});
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
   $("#trace").innerHTML = "";
   $("#reply").hidden = true;
@@ -161,9 +172,9 @@ $("#ask").onsubmit = async e => {
   e.preventDefault();
   const btn = $("#send");
   btn.disabled = true; btn.textContent = t("working");
-  try { await streamCase({customer: $("#customer").value, message: $("#msg").value}); }
+  try { await streamCase({message: $("#msg").value}); }
   catch (err) { $("#summary").innerHTML = `<span class="pill bad">${esc(err.message)}</span>`; }
   finally { btn.disabled = false; btn.textContent = t("send"); }
 };
-$("#reset").onclick = async () => { await api("POST", "/api/reset"); await txns(); };
+$("#reset").onclick = async () => { await api("POST", "/api/demo/reset"); await txns(); };
 boot();
