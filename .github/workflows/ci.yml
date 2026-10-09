@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.13", cache: pip }
-      - run: pip install -r requirements-dev.txt
+      - run: pip install -r requirements-dev.txt -c constraints.txt
       - run: GEMINI_API_KEY= GROQ_API_KEY= python -m pytest -q
       - name: The graph diagram in docs matches the code
         run: python scripts/graph_doc.py && git diff --exit-code docs/graph.md
@@ -104,7 +104,7 @@ jobs:
             sleep 2
           done
           [ "$st" = "awaiting_approval" ] || { kubectl logs deploy/wakeel-worker --tail=50; exit 1; }
-          curl -sf localhost:8000/metrics | grep -q wakeel_node_seconds_bucket
+          curl -sf localhost:8000/metrics | grep -q wakeel_jobs     # API pods count the queue; workers run the steps
           # Jaeger v2's query API (v3): the service appears once spans arrive;
           # then count the spans of its recent traces (OTLP JSON).
           for i in $(seq 1 30); do
@@ -127,9 +127,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.13" }
-      - run: pip install pip-audit bandit
-      - name: Dependencies (pip-audit)
-        run: pip-audit -r requirements.txt --progress-spinner off
+      - name: Install exactly what the image installs
+        run: pip install -r requirements.txt -c constraints.txt && pip install pip-audit bandit
+      - name: Dependencies, including indirect ones (pip-audit on the installed environment)
+        run: pip-audit --progress-spinner off --skip-editable
       - name: Code (bandit, medium severity and up)
         run: bandit -q -r wakeel -ll
       - name: Alert rules are valid (promtool)
@@ -151,7 +152,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.13", cache: pip }
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt -c constraints.txt
       - run: |
           WAKEEL_CASES_PER_MINUTE=100000 uvicorn wakeel.api:app --port 8000 > server.log 2>&1 &
           for i in $(seq 1 30); do curl -sf localhost:8000/api/health > /dev/null && break; sleep 1; done
@@ -174,7 +175,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.13", cache: pip }
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt -c constraints.txt
       - run: |
           SRC=postgresql://postgres:postgres@localhost:5432/wakeel
           out=$(python scripts/restore_drill.py prepare $SRC | tail -1); echo "$out"

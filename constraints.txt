@@ -1,0 +1,5 @@
+# Minimum safe versions of indirect dependencies (found by Trivy in the image,
+# 9 October 2026). Every install uses this file: pip install -r requirements.txt -c constraints.txt
+msgpack>=1.2.1
+urllib3>=2.8.0
+setuptools>=78.1.1
