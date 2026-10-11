@@ -15,6 +15,7 @@ graph TD;
 	supervisor(supervisor)
 	policy_agent(policy_agent)
 	ops_agent(ops_agent)
+	verify(verify)
 	approval(approval)
 	clarify(clarify)
 	execute(execute)
@@ -35,6 +36,8 @@ graph TD;
 	supervisor -.-> ops_agent;
 	supervisor -.-> policy_agent;
 	supervisor -.-> respond;
+	supervisor -.-> verify;
+	verify --> supervisor;
 	handoff --> __end__;
 	respond --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
