@@ -26,6 +26,7 @@ class ToolCall:
     id: str
     name: str
     args: dict[str, Any]
+    signature: str = ""          # Gemini 3's thought signature: must be sent back with the call
 
 
 @dataclass
@@ -139,7 +140,8 @@ class Gemini:
                 contents.append({"role": "user", "parts": [{"text": m["content"]}]})
             elif m["role"] == "assistant":
                 parts = [{"text": m["content"]}] if m.get("content") else []
-                parts += [{"functionCall": {"name": c["name"], "args": c["args"]}} for c in m.get("tool_calls", [])]
+                parts += [{"functionCall": {"name": c["name"], "args": c["args"]}, **({"thoughtSignature": c["signature"]} if c.get("signature") else {})}
+                          for c in m.get("tool_calls", [])]
                 contents.append({"role": "model", "parts": parts})
             elif m["role"] == "tool":
                 contents.append({"role": "user", "parts": [{"functionResponse": {"name": m["name"], "response": {"result": json.loads(m["content"])}}}]})
@@ -164,7 +166,7 @@ class Gemini:
             if "text" in p:
                 rep.text += p["text"]
             if "functionCall" in p:
-                rep.tool_calls.append(ToolCall(f"call_{i}", p["functionCall"]["name"], p["functionCall"].get("args", {})))
+                rep.tool_calls.append(ToolCall(f"call_{i}", p["functionCall"]["name"], p["functionCall"].get("args", {}), p.get("thoughtSignature", "")))
         u = d.get("usageMetadata", {})
         rep.tokens_in, rep.tokens_out = u.get("promptTokenCount", 0), u.get("candidatesTokenCount", 0)
         return rep

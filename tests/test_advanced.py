@@ -174,3 +174,17 @@ def test_reviewed_cases_become_masked_training_examples(index):
     blob = json.dumps(rows, ensure_ascii=False)
     assert "0551234567" not in blob and "sara" not in blob             # masked text only, no customer id
     assert json.loads(rows[1]["messages"][2]["content"]) == {"verdict": "supports"}   # the reviewer's label
+
+
+def test_gemini_thought_signatures_go_back_with_the_tool_call(monkeypatch):
+    sent = []
+    replies = iter([{"candidates": [{"content": {"parts": [{"functionCall": {"name": "find_duplicates", "args": {}}, "thoughtSignature": "sig-1"}]}}]},
+                    {"candidates": [{"content": {"parts": [{"text": "done"}]}}]}])
+    monkeypatch.setattr(llm, "_post", lambda url, headers, body, **k: sent.append(body) or next(replies))
+    g = llm.Gemini("k", "gemini-3.5-flash-lite")
+    r = g.chat([{"role": "user", "content": "hi"}], tools=[{"name": "find_duplicates", "description": "d", "parameters": {"type": "object", "properties": {}}}])
+    assert r.tool_calls[0].signature == "sig-1"
+    call = {"id": r.tool_calls[0].id, "name": "find_duplicates", "args": {}, "signature": r.tool_calls[0].signature}
+    g.chat([{"role": "user", "content": "hi"}, {"role": "assistant", "content": "", "tool_calls": [call]},
+            {"role": "tool", "tool_call_id": call["id"], "name": "find_duplicates", "content": "{}"}])
+    assert sent[1]["contents"][1]["parts"][0]["thoughtSignature"] == "sig-1"

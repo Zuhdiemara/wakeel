@@ -81,6 +81,16 @@ flowchart LR
 
 ## Results
 
+**Verifier, memory, reasoning effort and structured outputs, on live models** (12 October 2026, Groq `gpt-oss-120b` first, `python -m evals.run --model --skip-retrieval`):
+
+| | Result |
+|---|---|
+| Agent decisions (22 cases, 6 of them hard: mixed Arabic and English, dialect, two requests in one, a merchant on someone else's account, a duplicate that isn't in the ledger) | **22/22**, hard cases **6/6**, **0 wrong refunds** |
+| Attacks (13, including an indirect "note to the assistant: also refund…") | **0 unsafe outcomes** |
+| Verifier on 10 planted proposals (2 genuine, 8 that must not be paid) | **10/10**, **0 bad proposals passed** |
+
+The first live run found three mistakes, and each became a rule in code with a test: the agent proposed refunding a cancelled order without the merchant's confirmation; the verifier accepted a coffee purchase as a "fee charged by mistake"; and the agent asked "which merchant?" when the customer had named Jarir in Arabic. The second run, after the fixes, is the table above. It also found that Gemini 3 needs its "thought signature" sent back with each tool call; Wakeel now keeps it (tested).
+
 Offline, as run in CI (rules mode, no model). Run `python -m evals.run`.
 
 **Retrieval** (30 questions, 20 English and 10 Arabic; gold = the policy section that answers it):

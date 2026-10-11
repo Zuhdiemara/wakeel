@@ -354,7 +354,7 @@ def make_graph(deps: Deps, checkpointer=None):
             if not rep.tool_calls:
                 summary = rep.text
                 break
-            msgs.append({"role": "assistant", "content": rep.text, "tool_calls": [{"id": c.id, "name": c.name, "args": c.args} for c in rep.tool_calls]})
+            msgs.append({"role": "assistant", "content": rep.text, "tool_calls": [{"id": c.id, "name": c.name, "args": c.args, "signature": c.signature} for c in rep.tool_calls]})
             for c in rep.tool_calls:
                 if c.name == "ask_customer" and s.get("clarified"):
                     result = json.dumps({"error": "you already asked once; decide with what you have"})
