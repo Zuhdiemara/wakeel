@@ -22,7 +22,7 @@ def index():
     return Index(load_corpus(ROOT / "corpus"))
 
 
-def scripted(ops_plan, reply_text="", supervisor_intent="duplicate_charge", fake_citation=True, citation_shape=str):
+def scripted(ops_plan, reply_text="", supervisor_intent="duplicate_charge", fake_citation=True, citation_shape=str, verdict="supports"):
     """A stand-in model that answers each node by recognising its system prompt.
     ops_plan: a list of tool-call lists, one per ReAct turn; then a summary."""
     turn = {"n": 0}
@@ -48,6 +48,8 @@ def scripted(ops_plan, reply_text="", supervisor_intent="duplicate_charge", fake
             if i < len(ops_plan):
                 return Reply(tool_calls=[ToolCall(f"c{i}{j}", name, args) for j, (name, args) in enumerate(ops_plan[i])])
             return Reply(text="Investigation complete.")
+        if "independent second reviewer" in system:
+            return Reply(text=json.dumps({"verdict": verdict, "confidence": 0.9, "reasons": [f"scripted: {verdict}"]}))
         if "Write a short, warm reply" in system:
             return Reply(text=reply_text)
         raise AssertionError("unexpected prompt: " + system[:60])

@@ -36,7 +36,7 @@ def test_two_replicas_share_cases_and_pay_once(index, pg):
     with ThreadPoolExecutor(10) as pool:                       # 10 approvals, split across the replicas
         results = list(pool.map(lambda i: (a if i % 2 else b).decide(c["case_id"], True, f"r{i}"), range(10)))
     assert ledger.refund_calls == 1 and {r["status"] for r in results} == {"refunded"}
-    assert [e["action"] for e in b.store.trail(c["case_id"])] == ["case_opened", "refund_proposed", "approved", "refund_executed"]
+    assert [e["action"] for e in b.store.trail(c["case_id"])] == ["case_opened", "refund_proposed", "proposal_verified", "approved", "refund_executed"]
     assert a.store.verify()["ok"]
 
 

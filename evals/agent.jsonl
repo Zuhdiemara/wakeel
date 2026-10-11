@@ -14,3 +14,9 @@
 {"msg": "I cancelled my order at Amazon but was still charged", "intent": "cancelled_still_charged", "refund": null}
 {"msg": "I was charged twice last week", "intent": "duplicate_charge", "refund": null, "status": "needs_info"}
 {"msg": "HungerStation charged me twice yesterday", "intent": "duplicate_charge", "refund": "tx_1010"}
+{"msg": "Jarir خصم مني مرتين، 349 ريال", "intent": "duplicate_charge", "refund": "tx_1002", "hard": "mixed English and Arabic"}
+{"msg": "I was charged twice at Jarir, and also why do I pay a foreign fee?", "intent": "duplicate_charge", "refund": "tx_1002", "hard": "two requests in one"}
+{"msg": "Extra Electronics charged me twice", "intent": "duplicate_charge", "refund": null, "hard": "a merchant on another customer's account"}
+{"msg": "hungerstation double charged me for one order, 87.5", "intent": "duplicate_charge", "refund": "tx_1010", "hard": "lower case, amount in the text"}
+{"msg": "I paid Noon 1,200 SAR twice", "intent": "duplicate_charge", "refund": null, "hard": "claims a duplicate that isn't in the ledger"}
+{"msg": "جرير سحبوا مني الفلوس مرتين", "intent": "duplicate_charge", "refund": "tx_1002", "hard": "Saudi dialect"}

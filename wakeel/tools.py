@@ -70,6 +70,24 @@ def duplicate_groups(txns: list[Txn]) -> list[list[Txn]]:
     return [g for g in groups if len(g) > 1]
 
 
+FOREIGN_FEE = 0.025       # fees §2
+FEE_WORDS = ("fee", "رسوم", "رسم")
+
+
+def reason_problem(txns: list[Txn], t: Txn, reason: str) -> str | None:
+    """Rules for refund reasons that need evidence, checked in code (each one
+    came from a model getting it wrong in a live evaluation)."""
+    if reason == "cancelled_still_charged":
+        return "a cancelled-order refund needs the merchant's cancellation confirmation, which the agent cannot see: hand it to a person (disputes#8)"
+    if reason == "fee_charged_by_mistake":
+        if not any(w in t.merchant.lower() for w in FEE_WORDS):
+            return f"{t.id} ({t.merchant}) is a purchase, not a bank fee (fees#6)"
+        same_day = [x for x in txns if x.id != t.id and x.at[:10] == t.at[:10]]
+        if any(round(x.amount * FOREIGN_FEE) == t.amount for x in same_day):
+            return f"{t.id} is the correct 2.5% foreign transaction fee, not a mistake (fees#2)"
+    return None
+
+
 def settled(g: list[Txn]) -> bool:
     """Every duplicate in the group has already been refunded in full."""
     return all(t.refunded >= t.amount for t in g[1:])
@@ -114,6 +132,10 @@ class CaseTools:
         return {"groups": out}
 
     def t_ask_customer(self, question: str, options: list[str] | None = None) -> dict:
+        if self.message is not None:
+            named = sorted({g[0].merchant for g in duplicate_groups(self.ledger.transactions(self.customer)) if mentions(self.message, g[0].merchant)})
+            if len(named) == 1:            # the customer already said which: don't make them repeat it
+                return {"error": f"the customer already named {named[0]}; investigate that merchant instead of asking"}
         self.question = {"question": question[:300], "options": [str(o)[:80] for o in (options or [])][:6]}
         return {"asked": True, "note": "Stop here; the customer's answer will come back as a new message."}
 
@@ -129,6 +151,8 @@ class CaseTools:
             return {"error": f"amount must be between 0 and {(t.amount - t.refunded) / 100:.2f} SAR"}
         if amount > AUTO_CAP_HALALAS:
             return {"error": "above the 5,000 SAR automated limit: refer to a specialist (disputes#7)"}
+        if problem := reason_problem(list(txns.values()), t, reason):
+            return {"error": problem}
         if reason == "duplicate_charge":
             dup = next((g for g in duplicate_groups(list(txns.values())) if t in g), None)
             if dup is None:

@@ -69,6 +69,7 @@ const SCENARIOS = [
   {id: "duplicate", icon: "copy", who: "sara", title: "Charged twice", sub: "Finds it, proposes, a person approves",
    msg: "I was charged twice at Jarir Bookstore last week",
    notes: ["Watch the operations agent call <code>find_duplicates</code>, then <code>propose_refund</code>.",
+           "Then the <b>Verifier</b>: a second model, thinking harder, checks the proposal against facts that code recomputes from the ledger. If it doubts, two people must approve.",
            "Open <b>Safety checks</b>: a real duplicate, within 60 days, under the limit. The Nahdi duplicate is 75 days old, so it's excluded.",
            "Nothing is paid until a bank employee approves in panel 3. Then show the audit trail."]},
   {id: "large", icon: "users", who: "omar", title: "Large refund", sub: "4,599 SAR needs two approvers",
@@ -138,7 +139,7 @@ const custName = id => (people.customers[id] || id).split(" (")[0];
 // ---------------------------------------------------------------- plain-language steps
 const NODES = [
   ["intake", "Intake", "intake"], ["supervisor", "Supervisor", "supervisor"], ["policy_agent", "Policy agent", "policy"],
-  ["ops_agent", "Operations agent", "ops"], ["clarify", "Ask customer", "clarify"], ["approval", "Approval", "approval"],
+  ["ops_agent", "Operations agent", "ops"], ["clarify", "Ask customer", "clarify"], ["verify", "Verifier", "shield"], ["approval", "Approval", "approval"],
   ["execute", "Refund", "execute"], ["respond", "Reply", "respond"], ["handoff", "To a person", "handoff"],
 ];
 const INTENTS = {duplicate_charge: "a duplicate charge", fee_question: "a question about a fee", unrecognised: "a charge they don't recognise",
@@ -176,7 +177,12 @@ function explain(s) {
       return {...base, title: "Operations agent finished",
         text: `${s.steps} tool call${s.steps === 1 ? "" : "s"}. ` + (s.proposed ? "A refund was proposed: it now waits for a person. " : "No refund proposed. ") +
           (s.mode === "rules" ? "Ran on rules because no model was available. " : "") + (s.cross_check ? "The rules cross-check found a refund the model missed. " : "") +
+          (s.earlier_cases ? `Remembered ${s.earlier_cases} earlier case${s.earlier_cases > 1 ? "s" : ""} for this customer. ` : "") +
           (s.over_budget ? "Stopped at the token budget." : `Used ${s.tokens_spent} of 30,000 tokens.`)};
+    case "verify":
+      return {...base, tone: s.verdict === "doubt" ? "warn" : "", title: s.verdict === "doubt" ? "The verifier has doubts" : "The verifier agrees",
+        text: `An independent check of the proposal, ${s.by === "model" ? "by a second model thinking harder, against facts that code recomputed from the ledger" : "by code, recomputing every fact from the ledger"}: ` +
+          (s.reasons || []).slice(0, 3).join("; ") + "." + (s.verdict === "doubt" ? " Two different people must now approve." : "")};
     case "clarify":
       return {...base, tone: "warn", title: "Asked the customer", text: "More than one charge could be meant, and the agent never guesses. The graph pauses until the customer answers."};
     case "approval":
@@ -199,7 +205,8 @@ function explain(s) {
 
 function stepHTML(s, isNew) {
   const e = explain(s);
-  const meta = [`${(s.ms / 1000).toFixed(1)} s`, s.model ? esc(s.model) : "", s.tokens_in ? `${s.tokens_in + (s.tokens_out || 0)} tokens` : ""].filter(Boolean).join(" · ");
+  const meta = [`${(s.ms / 1000).toFixed(1)} s`, s.model ? esc(s.model) : "", s.effort ? `thinking: ${esc(s.effort)}` : "",
+    s.schema_ok === true ? "schema ✓" : s.schema_ok === false ? "schema ✕ → rules" : "", s.tokens_in ? `${s.tokens_in + (s.tokens_out || 0)} tokens` : ""].filter(Boolean).join(" · ");
   const raw = Object.fromEntries(Object.entries(s).filter(([k]) => k !== "start"));
   return `<li class="step ${e.tone}${isNew ? " new" : ""}"><span class="ico">${icon(e.ico)}</span>
     <div class="ttl">${esc(e.title)} <span class="meta">${meta}</span></div>
@@ -247,13 +254,18 @@ function checks(c) {
     add("pass", "Under the 5,000 SAR limit", sar(p.amount));
     add("pass", "The model can only propose", "<code>propose_refund</code> records a proposal. It has no way to move money.");
   }
+  const v = c.verification;
+  if (v) add(v.verdict === "doubt" ? "hold" : "pass", v.verdict === "doubt" ? "Verifier has doubts: two approvers needed" : "Independent verifier agrees",
+    `${v.by === "model" ? "A second model" : "Code"}: ${esc((v.reasons || []).slice(0, 2).join("; "))}`);
+  if (c.history?.cases?.length) add(c.history.refunds_90_days >= 2 ? "hold" : "pass", `Remembered ${c.history.cases.length} earlier case${c.history.cases.length > 1 ? "s" : ""}`,
+    `${c.history.refunds_90_days} refund${c.history.refunds_90_days === 1 ? "" : "s"} in the last 90 days${c.history.refunded_merchants.length ? ": " + esc(c.history.refunded_merchants.join(", ")) : ""}`);
   groups.filter(g => g.already_refunded).forEach(g =>
     add("fail", `Not offered: ${esc(g.merchant)}`, "This duplicate was already refunded, so it can't be paid again"));
   groups.filter(g => g.within_report_window === false).forEach(g =>
     add("fail", `Excluded: ${esc(g.merchant)}`, `A duplicate, but ${g.days_ago} days old, past the 60-day window`));
   if (c.status === "needs_info") add("hold", "Didn't guess between merchants", "It asks the customer which charge they mean");
   if (p) {
-    const need = p.amount >= 100000 ? 2 : 1, have = (c.approvals || []).length;
+    const need = needed(c), have = (c.approvals || []).length;
     if (c.refund?.ok) add("pass", `Approved by ${need === 2 ? "two people" : "a person"}`, esc((c.decision?.reviewers || []).map(staffName).join(" and ")));
     else if (c.status === "rejected") add("fail", "Rejected by a person", "No money moved");
     else add("hold", `Needs ${need === 2 ? "two different people" : "one person"} to approve`, `${have} of ${need} so far`);
@@ -349,19 +361,26 @@ async function answer(caseId, text) {
 }
 
 // ---------------------------------------------------------------- bank
+const needed = c => (c.proposal?.amount >= 100000 || c.verification?.verdict === "doubt") ? 2 : 1;
 function review(c) {
   const p = c?.proposal, el = $("#review");
   if (!c || !p) { el.innerHTML = `<div class="empty-art"><span class="art">${ART.bank}</span><span>${esc(t("noneWaiting"))}</span></div>`; return; }
-  const need = p.amount >= 100000 ? 2 : 1, ap = c.approvals || [];
+  const need = needed(c), ap = c.approvals || [];
+  const v = c.verification;
+  const why = p.amount >= 100000 ? "1,000 SAR or more needs two people" : v?.verdict === "doubt" ? "the verifier's doubt needs two people" : "";
+  const vbox = v ? `<div class="verdict ${v.verdict}"><b>${icon(v.verdict === "doubt" ? "attack" : "shield")} ${v.verdict === "doubt" ? "Verifier has doubts" : "Verifier agrees"}</b>
+    <span class="muted small">${v.by === "model" ? "second model" : "code checks"}${v.confidence != null ? ` · confidence ${Math.round(v.confidence * 100)}%` : ""}</span>
+    <ul>${(v.reasons || []).slice(0, 3).map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>` : "";
+  const hist = c.history ? `<dt>History</dt><dd>${c.history.cases.length ? `${c.history.cases.length} earlier case${c.history.cases.length > 1 ? "s" : ""}, ${c.history.refunds_90_days} refunded in 90 days` : "First case"}</dd>` : "";
   const slots = Array.from({length: need}, (_, i) => `<span class="slot ${ap[i] ? "on" : ""}" title="${esc(ap[i] ? staffName(ap[i]) : "waiting")}">${ap[i] ? esc(staffName(ap[i])[0]) : ""}</span>`).join("");
   const facts = `<dl class="kv"><dt>Customer</dt><dd>${esc(custName(c.customer))}</dd><dt>Merchant</dt><dd>${esc(p.merchant)}</dd>
-    <dt>Transaction</dt><dd><code>${esc(p.transaction_id)}</code></dd><dt>Reason</dt><dd>${esc(cap(p.reason).replace("_", " "))}</dd><dt>Policy</dt><dd><code>${esc(p.policy_section)}</code></dd></dl>`;
+    <dt>Transaction</dt><dd><code>${esc(p.transaction_id)}</code></dd><dt>Reason</dt><dd>${esc(cap(p.reason).replace("_", " "))}</dd><dt>Policy</dt><dd><code>${esc(p.policy_section)}</code></dd>${hist}</dl>${vbox}`;
   if (c.status === "awaiting_approval") {
     const me = $("#staff").value, mine = ap.includes(me);
     const other = Object.keys(people.staff).find(s => !ap.includes(s) && s !== me);
     el.innerHTML = `<div class="card"><div><span class="tag warn">Proposed by the agent</span></div>
       <div class="amt">${sar(p.amount).replace(" SAR", "")} <small>SAR refund</small></div>${facts}
-      <div class="approvers">${slots}<span>${ap.length} of ${need} approval${need > 1 ? "s" : ""}${need > 1 ? " · 1,000 SAR or more needs two people" : ""}</span></div>
+      <div class="approvers">${slots}<span>${ap.length} of ${need} approval${need > 1 ? "s" : ""}${why ? " · " + why : ""}</span></div>
       ${mine ? `<p class="small" style="margin:0">You already approved. The next approval must come from a different person.</p><div class="row"><button type="button" class="primary" id="switchStaff">Switch to ${esc(staffName(other))}</button></div>`
              : `<div class="row"><button type="button" class="primary" id="approve">Approve as ${esc(staffName(me))}</button><button type="button" class="danger" id="reject">Reject</button></div>`}
       <p class="muted small" style="margin:0">Nothing moves until ${need > 1 ? "both approve" : "you approve"}.</p></div>`;
@@ -499,7 +518,7 @@ async function boot() {
   flow([], "", false);
 
   const h = await api("GET", "/api/health");
-  const chain = (h.models || "").split("+").filter(Boolean);
+  const chain = /none|rules/i.test(h.models || "") ? [] : (h.models || "").split("+").filter(Boolean);
   $("#env").innerHTML = [
     ["cpu", chain.length ? `${chain.length} models · ${chain[0]} first` : "Rules only (no model keys)"],
     ["layers", `Embeddings: ${h.embeddings}`], ["bank", `Ledger: ${h.ledger}`], ["shield", `Screen: ${h.injection_screen}`], ["db", `State: ${h.state}`],

@@ -1,38 +1,31 @@
 {
- "retrieval": {
-  "bm25 (hash)": {
-   "recall@1": 0.567,
-   "recall@3": 0.733,
-   "mrr": 0.659
-  },
-  "vector (hash)": {
-   "recall@1": 0.7,
-   "recall@3": 0.9,
-   "mrr": 0.797
-  },
-  "hybrid w=1.0 (hash)": {
-   "recall@1": 0.6,
-   "recall@3": 0.9,
-   "mrr": 0.731
-  }
- },
+ "retrieval": {},
  "agent (rules)": {
-  "cases": 16,
+  "cases": 22,
   "intent_accuracy": 1.0,
   "decision_accuracy": 1.0,
+  "hard_cases": "6/6",
   "wrong_refund_proposals": 0,
-  "attacks": 12,
+  "attacks": 13,
   "attacks_handed_off": 8,
   "unsafe_outcomes": 0,
-  "seconds": 0.3,
+  "seconds": 0.4,
   "failures": []
+ },
+ "verifier (code)": {
+  "cases": 10,
+  "correct": 10,
+  "bad_proposals_passed": 0,
+  "rule_breaks_code_catches": 10,
+  "judgement_cases_model_caught": "0/0",
+  "misses": []
  },
  "injection_screens": {
   "patterns": {
    "attacks_caught": 8,
-   "attacks": 12,
+   "attacks": 13,
    "genuine_flagged": 0,
-   "genuine": 16
+   "genuine": 22
   }
  }
 }

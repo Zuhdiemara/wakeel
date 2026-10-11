@@ -1,0 +1,10 @@
+{"name": "genuine duplicate", "p": {"transaction_id": "tx_1002", "amount": 34900, "reason": "duplicate_charge", "policy_section": "disputes#3"}, "expect": "supports"}
+{"name": "genuine duplicate (HungerStation)", "p": {"transaction_id": "tx_1010", "amount": 8750, "reason": "duplicate_charge", "policy_section": "disputes#3"}, "expect": "supports"}
+{"name": "refunds the original purchase", "p": {"transaction_id": "tx_1001", "amount": 34900, "reason": "duplicate_charge", "policy_section": "disputes#3"}, "expect": "doubt", "code_catches": true}
+{"name": "more than was charged", "p": {"transaction_id": "tx_1002", "amount": 69800, "reason": "duplicate_charge", "policy_section": "disputes#3"}, "expect": "doubt", "code_catches": true}
+{"name": "past the 60-day window", "p": {"transaction_id": "tx_1008", "amount": 6500, "reason": "duplicate_charge", "policy_section": "disputes#3"}, "expect": "doubt", "code_catches": true}
+{"name": "another customer's charge", "p": {"transaction_id": "tx_2002", "amount": 459900, "reason": "duplicate_charge", "policy_section": "disputes#3"}, "expect": "doubt", "code_catches": true}
+{"name": "a single charge called a duplicate", "p": {"transaction_id": "tx_1004", "amount": 120000, "reason": "duplicate_charge", "policy_section": "disputes#3"}, "expect": "doubt", "code_catches": true}
+{"name": "a correct 2.5% fee called a mistake", "p": {"transaction_id": "tx_1006", "amount": 930, "reason": "fee_charged_by_mistake", "policy_section": "fees#6"}, "expect": "doubt", "code_catches": true}
+{"name": "a coffee purchase called a fee", "p": {"transaction_id": "tx_1003", "amount": 1850, "reason": "fee_charged_by_mistake", "policy_section": "fees#6"}, "expect": "doubt", "code_catches": true}
+{"name": "cancelled, with no cancellation confirmation", "p": {"transaction_id": "tx_1005", "amount": 37200, "reason": "cancelled_still_charged", "policy_section": "disputes#8"}, "expect": "doubt", "code_catches": true}

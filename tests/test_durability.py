@@ -25,8 +25,8 @@ def test_a_case_awaiting_approval_survives_a_restart(index, tmp_path):
     done = second.decide(c["case_id"], True, "noura")
     assert done["status"] == "refunded" and ledger.refund_calls == 1
     actions = [a["action"] for a in second.store.trail(c["case_id"])]
-    assert actions == ["case_opened", "refund_proposed", "approved", "refund_executed"]
-    assert second.store.verify() == {"ok": True, "entries": 4}
+    assert actions == ["case_opened", "refund_proposed", "proposal_verified", "approved", "refund_executed"]
+    assert second.store.verify() == {"ok": True, "entries": 5}
 
 
 def test_the_audit_trail_is_append_only_and_tamper_evident(index, tmp_path):

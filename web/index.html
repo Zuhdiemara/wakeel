@@ -107,9 +107,12 @@
   → intake        mask personal data · screen for attacks · detect language
   → supervisor    what does the customer need?  (model, rules as fallback)
   → policy agent  hybrid search over the policy → answer with citations
-  → operations    tools: list_transactions · find_duplicates · search_policy
-                         ask_customer · propose_refund
+  → operations    remembers the customer's earlier cases; tools:
+                  list_transactions · find_duplicates · search_policy
+                  ask_customer · propose_refund
   → ask customer  pauses if it isn't clear which charge
+  → verifier      a second model, thinking harder, re-checks the proposal
+                  against facts code recomputes; a doubt means two approvers
   → approval      pauses for one or two bank employees
   → refund        ledger call with an idempotency key
   → reply         numbers checked against the facts
@@ -119,6 +122,10 @@
       <li><b>Agents:</b> LangGraph, tool calling, interrupt and resume, PostgreSQL checkpoints</li>
       <li><b>Retrieval:</b> Arabic-aware keyword search and Gemini embeddings, fused and reranked, with citations</li>
       <li><b>Models:</b> a chain of 7 free models (Gemini, Groq); rules keep working if all of them fail</li>
+      <li><b>Reasoning:</b> thinking effort per step: low for triage, medium for money decisions, high for the verifier</li>
+      <li><b>Structured outputs:</b> JSON schemas the provider decodes against, validated again in code</li>
+      <li><b>Memory:</b> each customer's earlier cases; repeated refunds bring in a second reviewer</li>
+      <li><b>Learning loop:</b> reviewed cases export as masked training data for a smaller in-Kingdom model</li>
       <li><b>Safety:</b> injection patterns and Prompt Guard, PII masking, an output guard, a token budget</li>
       <li><b>Production:</b> FastAPI, JWT roles, job queue and workers, Docker, Kubernetes, OpenTelemetry, Prometheus</li>
       <li><b>Evaluations in CI:</b> 16/16 decisions on a live model with 0 unsafe refunds; 169 cases/s under load</li>

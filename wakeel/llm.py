@@ -10,6 +10,8 @@ graph never depends on a vendor SDK.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import os
 import time
@@ -43,6 +45,41 @@ class LLMError(Exception):
     def __init__(self, msg: str, retryable: bool = True):
         super().__init__(msg)
         self.retryable = retryable
+
+
+# How hard the model should think on this step: "low", "medium" or "high", or
+# None for the provider's default. Set per graph step (see effort() below), so
+# routing stays fast and the money decisions get more reasoning. Adapters map
+# it to their own setting: reasoning_effort (gpt-oss), thinking (Gemini).
+EFFORT: contextvars.ContextVar[str | None] = contextvars.ContextVar("effort", default=None)
+
+
+@contextlib.contextmanager
+def effort(level: str | None):
+    tok = EFFORT.set(level)
+    try:
+        yield
+    finally:
+        EFFORT.reset(tok)
+
+
+def schema_of(json_mode) -> dict | None:
+    """json_mode is False, True (any JSON object) or a schema
+    {"name": str, "schema": {...}} for structured output."""
+    return json_mode if isinstance(json_mode, dict) else None
+
+
+def degrade(call, messages, tools, json_mode):
+    """Calls with the richest options first. If the provider rejects an option
+    (a 400 for a schema or a reasoning setting it doesn't support), retries
+    without it, so a newer feature never costs a working provider."""
+    try:
+        return call(messages, tools, json_mode)
+    except LLMError as e:
+        if e.retryable or not (schema_of(json_mode) or EFFORT.get()):
+            raise
+    with effort(None):
+        return call(messages, tools, bool(json_mode))
 
 
 class LLM(Protocol):
@@ -85,6 +122,16 @@ class Gemini:
         return {"x-goog-api-key": self.key}
 
     def chat(self, messages, tools=None, json_mode=False) -> Reply:
+        return degrade(self._chat, messages, tools, json_mode)
+
+    def thinking(self, level: str) -> dict | None:
+        if self.model.startswith("gemini-2.5"):
+            return {"thinkingBudget": {"low": 0 if "flash" in self.model else 128, "medium": 1024, "high": 4096}[level]}
+        if self.model.startswith("gemini-3"):
+            return {"thinkingLevel": {"low": "low", "medium": "medium", "high": "high"}[level]}
+        return None
+
+    def _chat(self, messages, tools=None, json_mode=False) -> Reply:
         system = "\n".join(m["content"] for m in messages if m["role"] == "system")
         contents = []
         for m in messages:
@@ -103,6 +150,10 @@ class Gemini:
             body["tools"] = [{"functionDeclarations": [{"name": t["name"], "description": t["description"], "parameters": t["parameters"]} for t in tools]}]
         if json_mode:
             body["generationConfig"]["responseMimeType"] = "application/json"
+        if sc := schema_of(json_mode):
+            body["generationConfig"]["responseJsonSchema"] = sc["schema"]
+        if (level := EFFORT.get()) and (cfg := self.thinking(level)):
+            body["generationConfig"]["thinkingConfig"] = cfg
         t0 = time.monotonic()
         d = _post(self.url(), self.headers(), body)
         parts = (d.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
@@ -126,6 +177,9 @@ class OpenAICompatible:
         self.key, self.model, self.base, self.name, self.supports_tools = key, model, base.rstrip("/"), name, supports_tools
 
     def chat(self, messages, tools=None, json_mode=False) -> Reply:
+        return degrade(self._chat, messages, tools, json_mode)
+
+    def _chat(self, messages, tools=None, json_mode=False) -> Reply:
         t0 = time.monotonic()
         d = _post(f"{self.base}/chat/completions", {"Authorization": f"Bearer {self.key}"}, self.body(messages, tools, json_mode))
         return self.parse(d, t0)
@@ -145,8 +199,16 @@ class OpenAICompatible:
         body: dict[str, Any] = {"model": self.model, "messages": wire, "temperature": 0.1, "max_tokens": 1500}
         if tools:
             body["tools"] = [{"type": "function", "function": t} for t in tools]
-        if json_mode:
+        if sc := schema_of(json_mode):
+            # Constrained decoding: the provider can only produce output that
+            # matches the schema (strict), not merely "some JSON".
+            body["response_format"] = {"type": "json_schema", "json_schema": {"name": sc["name"], "schema": sc["schema"], "strict": True}}
+        elif json_mode:
             body["response_format"] = {"type": "json_object"}
+        if (level := EFFORT.get()) and "gpt-oss" in self.model:
+            body["reasoning_effort"] = level
+            if level == "high":                 # reasoning tokens count against the output cap
+                body["max_tokens"] = 3000
         return body
 
     def parse(self, d: dict, t0: float) -> Reply:
@@ -175,6 +237,8 @@ class Claude:
         system = "\n".join(m["content"] for m in messages if m["role"] == "system")
         if json_mode:
             system += "\nRespond with one JSON object only."
+        if sc := schema_of(json_mode):
+            system += " It must match this JSON schema: " + json.dumps(sc["schema"])
         wire: list[dict] = []
         for m in messages:
             if m["role"] == "user":
