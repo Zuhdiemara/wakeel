@@ -3,53 +3,129 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wakeel · dispute agent</title>
+<title>Wakeel · card-dispute agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Arabic:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="icon" type="image/svg+xml" href="/static/logo.svg">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header>
-  <div><b>Wakeel</b> <span class="ar">وكيل</span> <span class="muted">· a card-dispute agent for Sahm Bank (fictional)</span></div>
-  <div class="row" style="margin:0;align-items:center"><span class="muted small" id="health">…</span><button class="small-btn" id="lang" type="button" style="margin:0">العربية</button></div>
+<header class="top">
+  <div class="brand">
+    <img class="logo" src="/static/logo.svg" alt="" width="40" height="40">
+    <div><b>Wakeel</b> <span class="ar-name">وكيل</span><br><span class="muted small" data-t="tagline">AI agent for card disputes · Sahm Bank (fictional)</span></div>
+  </div>
+  <div class="env" id="env" aria-label="System status"></div>
+  <div class="actions">
+    <button type="button" id="howBtn"><i data-icon="info"></i><span data-t="how">How it works</span></button>
+    <label class="switch"><input type="checkbox" id="notesToggle"> <i data-icon="notes"></i><span data-t="notes">Presenter notes</span></label>
+    <button type="button" id="langBtn"><i data-icon="globe"></i><span id="lang">العربية</span></button>
+    <button type="button" id="reset"><i data-icon="reset"></i><span data-t="reset">Reset demo</span></button>
+  </div>
 </header>
-<main>
-  <section class="col" aria-labelledby="h-customer">
-    <h2 id="h-customer" data-t="customer">1 · Customer</h2>
-    <label class="small muted" for="customer">Signed in as (demo sign-in)</label>
-    <select id="customer"></select>
-    <div class="chips" id="examples"></div>
-    <form id="ask">
-      <label class="sr" for="msg">Message</label>
-      <textarea id="msg" rows="4" dir="auto" maxlength="2000" placeholder="Describe the problem, in English or Arabic"></textarea>
-      <button class="primary" type="submit" id="send" data-t="send">Send</button>
-    </form>
-    <div id="reply" class="bubble" dir="auto" hidden></div>
-    <h3>Transactions</h3>
-    <div class="scroll"><table id="txns"></table></div>
-    <button class="small-btn" id="reset" type="button">Reset demo data</button>
-  </section>
-  <section class="col" aria-labelledby="h-trace">
-    <h2 id="h-trace" data-t="trace">2 · What the agent did</h2>
-    <div class="pipe" id="pipe" aria-label="Agent steps">
-      <span data-node="intake">intake</span><span data-node="supervisor">supervisor</span><span data-node="policy_agent">policy</span>
-      <span data-node="ops_agent">operations</span><span data-node="clarify">ask customer</span><span data-node="approval">approval</span>
-      <span data-node="execute">refund</span><span data-node="respond">reply</span><span data-node="handoff">to a person</span>
+
+<nav class="scenarios" aria-label="Demo scenarios">
+  <span class="label" data-t="scenarios">Demo scenarios</span>
+  <div id="scenarios" class="scen-list"></div>
+</nav>
+<div id="notes" class="notes" hidden></div>
+
+<main class="grid">
+  <section class="panel" aria-labelledby="h-cust">
+    <div class="panel-head">
+      <h2 id="h-cust"><span class="pnum"><i data-icon="user"></i></span><span data-t="customer">Customer</span></h2>
+      <label class="who"><span class="sr" data-t="signedAs">Signed in as</span><select id="customer"></select></label>
     </div>
-    <div id="summary" class="muted small" data-t="start">Send a message to start a case.</div>
-    <ol id="trace"></ol>
+    <div class="chat" id="chat" aria-live="polite">
+      <div class="empty"><i data-art="chat"></i><p data-t="chatEmpty">Pick a scenario above, or write a message in English or Arabic.</p></div>
+    </div>
+    <form id="ask" class="composer">
+      <label class="sr" for="msg">Message</label>
+      <textarea id="msg" rows="2" dir="auto" maxlength="2000" placeholder="Describe the problem…"></textarea>
+      <button class="primary send" type="submit" id="send" aria-label="Send"><i data-icon="send"></i></button>
+    </form>
+    <details class="txns" open>
+      <summary><span data-t="txns">Card transactions</span></summary>
+      <div class="scroll"><table id="txns"></table></div>
+    </details>
   </section>
-  <section class="col" aria-labelledby="h-review">
-    <h2 id="h-review" data-t="reviewer">3 · Bank reviewer</h2>
-    <label class="small muted" for="staff">Signed in as (demo sign-in)</label>
-    <select id="staff"></select>
-    <div id="review" class="muted small" data-t="none">No refund is waiting for approval.</div>
+
+  <section class="panel agent" aria-labelledby="h-agent">
+    <div class="panel-head">
+      <h2 id="h-agent"><span class="pnum"><i data-icon="bot"></i></span><span data-t="agent">The agent at work</span></h2>
+      <span id="status" class="status" data-t="idle">Waiting for a message</span>
+    </div>
+    <ol class="flow" id="flow" aria-label="Agent steps"></ol>
+    <div class="stats" id="stats" hidden></div>
+    <div class="cols">
+      <div class="steps-wrap">
+        <h3 data-t="whatHappened">What happened, step by step</h3>
+        <ol id="steps" class="steps"><li class="empty-art"><i data-art="agent"></i><span data-t="noSteps">Steps appear here as the agent works.</span></li></ol>
+      </div>
+      <div class="evidence">
+        <div class="tabs" role="tablist" aria-label="Evidence">
+          <button role="tab" type="button" id="t-checks" aria-controls="tab-checks" aria-selected="true" data-tab="checks"><span data-t="tabChecks">Safety checks</span></button>
+          <button role="tab" type="button" id="t-sources" aria-controls="tab-sources" aria-selected="false" data-tab="sources"><span data-t="tabSources">Sources</span></button>
+          <button role="tab" type="button" id="t-tools" aria-controls="tab-tools" aria-selected="false" data-tab="tools"><span data-t="tabTools">Tool calls</span></button>
+        </div>
+        <div class="tabpanel" role="tabpanel" id="tab-checks" aria-labelledby="t-checks"><p class="muted small" data-t="checksEmpty">The checks the code ran appear here.</p></div>
+        <div class="tabpanel" role="tabpanel" id="tab-sources" aria-labelledby="t-sources" hidden><p class="muted small" data-t="sourcesEmpty">Policy sections the answer cites appear here.</p></div>
+        <div class="tabpanel" role="tabpanel" id="tab-tools" aria-labelledby="t-tools" hidden><p class="muted small" data-t="toolsEmpty">Tools the model called appear here.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-bank">
+    <div class="panel-head">
+      <h2 id="h-bank"><span class="pnum"><i data-icon="bank"></i></span><span data-t="bank">Bank employee</span></h2>
+      <label class="who"><span class="sr" data-t="signedAs">Signed in as</span><select id="staff"></select></label>
+    </div>
+    <div id="review" class="review"><div class="empty-art"><i data-art="bank"></i><span data-t="noneWaiting">No refund is waiting for approval.</span></div></div>
     <h3 data-t="queue">Approval queue</h3>
-    <ul id="queue" class="list"></ul>
-    <h3 data-t="audit">Audit trail</h3>
-    <div class="muted small" id="auditOk"></div>
-    <ol id="audit" class="list"></ol>
+    <ul id="queue" class="queue"></ul>
+    <h3 class="audit-h"><span data-t="audit">Audit trail</span> <span id="chain"></span></h3>
+    <ol id="audit" class="audit"><li class="muted small" data-t="auditEmpty">Every action on the case is recorded here.</li></ol>
   </section>
 </main>
-<footer class="muted small">Sahm Bank, its customers and policies are fictional. No real money moves. Personal data is masked before any model sees it.</footer>
+
+<footer class="foot muted small">
+  <span data-t="footer">Sahm Bank, its customers and policies are fictional. No real money moves. Personal data is masked before any model sees it.</span>
+  <a href="https://github.com/Zuhdiemara/wakeel" target="_blank" rel="noopener">github.com/Zuhdiemara/wakeel</a>
+</footer>
+
+<dialog id="how" aria-labelledby="h-how">
+  <form method="dialog" class="how">
+    <div class="how-head"><h2 id="h-how"><img src="/static/logo.svg" alt="" width="28" height="28"> How Wakeel works</h2><button value="close" aria-label="Close">✕</button></div>
+    <p class="lead">The model proposes. Code checks. A person approves.</p>
+    <div class="principles">
+      <div><i data-icon="spark"></i><b>1 · The model proposes</b><p>A LangGraph supervisor routes the case. A policy agent answers from the bank's policy with citations. An operations agent calls tools to look at the customer's transactions, and can only <i>propose</i> a refund.</p></div>
+      <div><i data-icon="shield"></i><b>2 · Code checks</b><p>Inside the tools: a real duplicate, within 60 days, under 5,000 SAR, and only the signed-in customer's own transactions. It never guesses between merchants. Messages are screened for prompt injection, and personal data is masked.</p></div>
+      <div><i data-icon="approval"></i><b>3 · A person approves</b><p>The graph pauses for a bank employee. Two different people must approve 1,000 SAR or more. The refund carries an idempotency key, so it can never be paid twice, and every action goes into a hash-chained audit trail.</p></div>
+    </div>
+    <h3>The graph</h3>
+    <pre class="graph">customer message
+  → intake        mask personal data · screen for attacks · detect language
+  → supervisor    what does the customer need?  (model, rules as fallback)
+  → policy agent  hybrid search over the policy → answer with citations
+  → operations    tools: list_transactions · find_duplicates · search_policy
+                         ask_customer · propose_refund
+  → ask customer  pauses if it isn't clear which charge
+  → approval      pauses for one or two bank employees
+  → refund        ledger call with an idempotency key
+  → reply         numbers checked against the facts
+  ↘ to a person   attacks, stolen cards, anything it shouldn't decide</pre>
+    <h3>Built with</h3>
+    <ul class="built">
+      <li><b>Agents:</b> LangGraph, tool calling, interrupt and resume, PostgreSQL checkpoints</li>
+      <li><b>Retrieval:</b> Arabic-aware keyword search and Gemini embeddings, fused and reranked, with citations</li>
+      <li><b>Models:</b> a chain of 7 free models (Gemini, Groq); rules keep working if all of them fail</li>
+      <li><b>Safety:</b> injection patterns and Prompt Guard, PII masking, an output guard, a token budget</li>
+      <li><b>Production:</b> FastAPI, JWT roles, job queue and workers, Docker, Kubernetes, OpenTelemetry, Prometheus</li>
+      <li><b>Evaluations in CI:</b> 16/16 decisions on a live model with 0 unsafe refunds; 169 cases/s under load</li>
+    </ul>
+  </form>
+</dialog>
+
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -147,6 +147,8 @@ python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m evals.run                          # add --model with keys set
 ```
 
+**The demo:** `scripts/demo.sh` starts it at http://localhost:8000 with demo sign-in and fresh data. The page has six guided scenarios (a policy question, an unclear request, a duplicate charge, a large refund needing two approvers, a prompt injection, and Arabic), and shows each step in plain language with the safety checks, cited sources and tool calls behind it. *Presenter notes* show what to say for each scenario, and *How it works* explains the design.
+
 **Models are optional.** Without keys it runs in rules mode. With a free key in `GEMINI_API_KEY` and/or `GROQ_API_KEY` (see `.env.example`), the model path is used, Gemini first and Groq on failure.
 
 **MCP** (for example, in Claude Desktop's config):

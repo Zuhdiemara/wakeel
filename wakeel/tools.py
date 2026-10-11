@@ -70,6 +70,11 @@ def duplicate_groups(txns: list[Txn]) -> list[list[Txn]]:
     return [g for g in groups if len(g) > 1]
 
 
+def settled(g: list[Txn]) -> bool:
+    """Every duplicate in the group has already been refunded in full."""
+    return all(t.refunded >= t.amount for t in g[1:])
+
+
 class CaseTools:
     def __init__(self, customer: str, ledger: Ledger, index: Index, rerank_llm=None, lang: str = "en", now: datetime | None = None,
                  message: str | None = None, clarified: bool = False):
@@ -104,7 +109,8 @@ class CaseTools:
         for g in duplicate_groups(self.ledger.transactions(self.customer)):
             age = (self.now - _when(g[0])).days
             out.append({"merchant": g[0].merchant, "amount_sar": g[0].amount / 100, "original": g[0].id,
-                        "duplicates": [t.id for t in g[1:]], "days_ago": age, "within_report_window": age <= REPORT_DAYS})
+                        "duplicates": [t.id for t in g[1:]], "days_ago": age, "within_report_window": age <= REPORT_DAYS,
+                        "already_refunded": settled(g)})
         return {"groups": out}
 
     def t_ask_customer(self, question: str, options: list[str] | None = None) -> dict:
@@ -132,7 +138,7 @@ class CaseTools:
             # Never guess between merchants: if the customer named none and more
             # than one duplicate qualifies, the agent must ask first.
             if self.message is not None and not mentions(self.message, t.merchant):
-                eligible = [g for g in duplicate_groups(list(txns.values())) if (self.now - _when(g[0])).days <= REPORT_DAYS]
+                eligible = [g for g in duplicate_groups(list(txns.values())) if (self.now - _when(g[0])).days <= REPORT_DAYS and not settled(g)]
                 if len(eligible) > 1 and not self.clarified:
                     return {"error": "ambiguous: several duplicates qualify and the customer did not name the merchant; "
                                      "call ask_customer with the merchants as options",
