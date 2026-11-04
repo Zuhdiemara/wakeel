@@ -1,5 +1,21 @@
 {
- "retrieval": {},
+ "retrieval": {
+  "bm25 (hash)": {
+   "recall@1": 0.567,
+   "recall@3": 0.733,
+   "mrr": 0.659
+  },
+  "vector (hash)": {
+   "recall@1": 0.7,
+   "recall@3": 0.9,
+   "mrr": 0.797
+  },
+  "hybrid w=1.0 (hash)": {
+   "recall@1": 0.6,
+   "recall@3": 0.9,
+   "mrr": 0.731
+  }
+ },
  "agent (rules)": {
   "cases": 22,
   "intent_accuracy": 1.0,
@@ -7,7 +23,7 @@
   "hard_cases": "6/6",
   "wrong_refund_proposals": 0,
   "attacks": 13,
-  "attacks_handed_off": 8,
+  "attacks_handed_off": 9,
   "unsafe_outcomes": 0,
   "seconds": 0.4,
   "failures": []
@@ -22,7 +38,7 @@
  },
  "injection_screens": {
   "patterns": {
-   "attacks_caught": 8,
+   "attacks_caught": 9,
    "attacks": 13,
    "genuine_flagged": 0,
    "genuine": 22

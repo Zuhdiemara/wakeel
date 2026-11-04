@@ -47,6 +47,7 @@ MAX_TOOL_STEPS = 8
 # How hard the model thinks at each step: quick triage and wording, more
 # reasoning where money is decided, the most for the independent check.
 DEFAULT_EFFORT = {"supervisor": "low", "policy": "low", "ops": "medium", "verify": "high", "respond": "low"}
+REPEAT_MERCHANT_DISPUTES = 3   # earlier disputes at the same merchant in 90 days that flag a pattern
 REPEAT_REFUNDS = 2         # earlier refunds in 90 days that make the verifier ask for a second reviewer
 
 
@@ -71,6 +72,7 @@ class State(TypedDict, total=False):
     text: str                  # the message with personal data masked
     pii: list[str]
     injection: list[str]
+    guard_missing: bool        # the classifier layer was required but unavailable for this message
     intent: str
     policy: dict               # {"answer", "citations", "passages"}
     ops: dict                  # {"summary", "steps"}
@@ -100,6 +102,7 @@ class Deps:
     efforts: dict = field(default_factory=lambda: dict(DEFAULT_EFFORT))   # reasoning effort per step
     history: Callable[[str], list[dict]] | None = None   # the customer's earlier cases (Agent wires the store in)
     verifier: bool = True          # a second, independent check of every refund proposal
+    require_guard: bool = False    # the classifier layer is mandatory: without it, refunds need two reviewers
 
 
 def _span(node: str, t0: float, rep: Reply | None = None, **extra) -> dict:
@@ -145,7 +148,14 @@ def customer_history(deps: Deps, customer: str, case_id: str) -> dict:
               "amount_sar": (r.get("amount") or 0) / 100 or None, "merchant": names.get(r.get("transaction_id"))} for r in rows[:10]]
     recent = [r for r in rows if r.get("status") == "refunded" and r.get("created")
               and now - datetime.fromisoformat(r["created"]) <= timedelta(days=90)]
-    return {"cases": cases, "refunds_90_days": len(recent), "refunded_merchants": sorted({names.get(r.get("transaction_id")) or "?" for r in recent})}
+    window = [r for r in rows if r.get("created") and now - datetime.fromisoformat(r["created"]) <= timedelta(days=90)]
+    per_merchant: dict = {}
+    for r in window:
+        m = names.get(r.get("transaction_id"))
+        if m:
+            per_merchant[m] = per_merchant.get(m, 0) + 1
+    return {"cases": cases, "refunds_90_days": len(recent), "refunded_merchants": sorted({names.get(r.get("transaction_id")) or "?" for r in recent}),
+            "disputes_by_merchant_90_days": per_merchant}
 
 
 def verify(deps: Deps, customer: str, proposal: dict, policy: dict, history: dict) -> tuple[dict, Reply | None]:
@@ -167,6 +177,7 @@ def verify(deps: Deps, customer: str, proposal: dict, policy: dict, history: dic
         "amount_within_charge": bool(t) and 0 < proposal["amount"] <= t.amount - t.refunded,
         "under_auto_limit": proposal["amount"] <= AUTO_CAP_HALALAS,
         "earlier_refunds_90_days": history.get("refunds_90_days", 0),
+        "earlier_disputes_this_merchant_90_days": (history.get("disputes_by_merchant_90_days") or {}).get(t.merchant, 0) if t else 0,
     }
     rule = reason_problem(list(txns.values()), t, proposal.get("reason", "")) if t else None
     problems = [msg for ok, msg in [
@@ -177,6 +188,8 @@ def verify(deps: Deps, customer: str, proposal: dict, policy: dict, history: dic
         (facts["under_auto_limit"], "the amount is above the 5,000 SAR automated limit"),
         (rule is None, rule),
         (facts["earlier_refunds_90_days"] < REPEAT_REFUNDS, f"{facts['earlier_refunds_90_days']} earlier refunds in 90 days: a second reviewer should look"),
+        (facts["earlier_disputes_this_merchant_90_days"] < REPEAT_MERCHANT_DISPUTES,
+         f"{facts['earlier_disputes_this_merchant_90_days']} earlier disputes at this merchant in 90 days: a possible fraud or merchant pattern for the fraud team"),
     ] if not ok]
     section = proposal.get("policy_section", "").split(".w")[0]
     policy_text = [p["text"] for p in policy.get("passages", []) if p["id"].split(".w")[0] == section]
@@ -225,13 +238,17 @@ def make_graph(deps: Deps, checkpointer=None):
         text, pii = guards.redact(s["message"])
         inj = guards.injection_signals(s["message"])
         extra = {}
+        score = None
         if deps.guard is not None:
             score = deps.guard.score(text)          # the masked text: no personal data leaves
             extra["guard_score"] = None if score is None else round(score, 4)
             if score is not None and score >= deps.guard.threshold:
                 inj = inj + [f"prompt-guard {score:.3f}"]
+        missing = deps.require_guard and score is None
+        if missing:
+            extra["guard_missing"] = True
         lang = "ar" if is_arabic(text) else "en"
-        return {"text": text, "pii": pii, "injection": inj, "lang": lang, "status": "running",
+        return {"text": text, "pii": pii, "injection": inj, "lang": lang, "status": "running", "guard_missing": missing,
                 "trace": [_span("intake", t0, lang=lang, pii=pii, injection=len(inj), **extra)]}
 
     def classify_rules(text: str) -> str:
@@ -420,7 +437,7 @@ def make_graph(deps: Deps, checkpointer=None):
         approvals = list(s.get("approvals") or [])
         doubt = (s.get("verification") or {}).get("verdict") == "doubt"
         # Large refunds, and any refund the verifier doubts, need two different people.
-        required = 2 if s["proposal"]["amount"] >= deps.dual_approval_halalas or doubt else 1
+        required = 2 if s["proposal"]["amount"] >= deps.dual_approval_halalas or doubt or s.get("guard_missing") else 1
         decision = interrupt({"case_id": s["case_id"], "proposal": s["proposal"], "approvals": approvals, "required": required})
         reviewer, note = str(decision.get("reviewer", ""))[:60], str(decision.get("note", ""))[:300]
         if not decision.get("approved"):

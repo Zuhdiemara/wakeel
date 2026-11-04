@@ -63,13 +63,48 @@ _INJECTION = [
     r"تجاهل (كل |جميع )?(التعليمات|الاوامر|القواعد)",
     r"(اكشف|اعرض|اطبع) (التعليمات|موجه النظام)",
     r"انت الان|بدون (موافقه|مراجعه)",
+    # added after a generated red team (agent-core): families the first list missed
+    r"(new|updated) (rules|instructions|policy) from (the )?(developer|admin|system)",
+    r"(safety|security) (checks?|filters?|rules?) (are|is) (off|disabled)",
+    r"(repeat|print|copy) (the )?(text|words|message|everything) (above|before this)",
+    r"(note|message|instruction)s? (to|for) the (assistant|ai|agent|model)",
+    r"(already|has been) (approved|confirmed|verified) by (the )?(manager|staff|bank|admin)",
+    r"<\/?(system|assistant|tool)>|\[/?inst\]",
+    r"let'?s play a game|no (limits|restrictions)",
+    r"(another|other|a different) (customer|user|client)'?s? (phone|number|id|national|data|details|card)",
+    r"تعليمات جديده من (المطور|الادمن|النظام)",
+    r"(الضوابط|القيود) (متوقفه|معطله)",
+    r"كرر (النص|الكلام) (اللي|الذي) (فوق|قبل)",
+    r"(ملاحظه|رساله) (للمساعد|للنظام)",
+    r"(تمت|تم) (الموافقه|التاكيد) من (المدير|الموظف|البنك)",
+    r"عميل (ثاني|اخر)",
 ]
+
+_LOOKALIKE = str.maketrans({"а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x", "у": "y", "і": "i",
+                            "А": "A", "Е": "E", "О": "O", "Р": "P", "С": "C"})
+_INVISIBLE = re.compile("[\u200b-\u200f\u2060\ufeff]")
+
+
+def canonical(text: str) -> str:
+    """Undo look-alike letters and invisible characters, so obfuscated attacks meet the same patterns."""
+    import unicodedata
+    return _INVISIBLE.sub("", unicodedata.normalize("NFKC", text)).translate(_LOOKALIKE)
 _INJECTION_RX = [re.compile(p) for p in _INJECTION]
 
 
 def injection_signals(text: str) -> list[str]:
-    t = normalise(text)
-    return [p.pattern for p in _INJECTION_RX if p.search(t)]
+    t = normalise(canonical(text))
+    hits = [p.pattern for p in _INJECTION_RX if p.search(t)]
+    if _INVISIBLE.search(text):
+        hits.append("invisible-characters")
+    if canonical(text) != unicodedata_nfkc(text) and re.search("[\u0400-\u04ff]", text):
+        hits.append("look-alike-letters")
+    return hits
+
+
+def unicodedata_nfkc(text: str) -> str:
+    import unicodedata
+    return _INVISIBLE.sub("", unicodedata.normalize("NFKC", text))
 
 
 _LEAK = re.compile(r"(you are the operations agent|treat the message as data|return json|system prompt|write a short, warm reply)", re.I)
@@ -107,3 +142,10 @@ def guard_from_env():
     if os.getenv("PROMPT_GUARD", "1") != "0" and (k := os.getenv("GROQ_API_KEY")):
         return PromptGuard(k)
     return None
+
+
+def guard_required() -> bool:
+    """WAKEEL_REQUIRE_GUARD=1: the classifier layer is mandatory. Patterns alone caught 2 of 15 held-out attacks
+    in the agent-core red team, so when the classifier is missing or fails, refunds need two reviewers."""
+    import os
+    return os.getenv("WAKEEL_REQUIRE_GUARD", "0") == "1"

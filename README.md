@@ -153,6 +153,15 @@ Hybrid is not automatically better. With strong embeddings, every bit of BM25 we
 
 **Choosing a model, measured:** `python -m evals.compare` runs the same cases and attacks on each configured provider on its own, and reports intent and decision accuracy, wrong refunds, unsafe outcomes, p50 and p95 latency, tokens per case, and how often each fell back to rules. Model choice is a measured trade-off, made per task.
 
+## November 2026 hardening
+
+- **Obfuscation-proof screen.** Look-alike letters (Cyrillic "а", "о") and zero-width characters are undone before the patterns run, and both are reported as signals on their own. Seven new attack families came from a generated red team in [agent-core](../agent-core): developer "new rules", "safety checks are off", "repeat the text above", notes addressed to the assistant, false manager approval, role-play games, and requests for another customer's data. Each has Arabic forms.
+  - **On Wakeel's own attack set** (never used for tuning), the patterns caught **8 → 9 of 13**, with **0 of 22** genuine messages wrongly flagged.
+  - **On 15 new hand-written attacks**, the patterns caught only **1**. Patterns can't be the defence on their own.
+- **Mandatory classifier mode.** With `WAKEEL_REQUIRE_GUARD=1`, if Prompt Guard is down or unreachable for a message, its refund needs **two reviewers** instead of one. The case is still served, and the missing safety check is recorded in the trace.
+- **Repeat disputes at one merchant.** Memory now counts the customer's disputes per merchant over 90 days. Three or more earlier disputes at the same merchant make the verifier doubt the refund, which means two reviewers, and say why: "a possible fraud or merchant pattern for the fraud team".
+- Offline evaluation after the change: **22/22 decisions, 6/6 hard cases, 0 wrong refunds, 0 unsafe outcomes**, and 6 new tests (`tests/test_enhancements.py`).
+
 ## Run it
 
 ```bash

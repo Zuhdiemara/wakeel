@@ -98,7 +98,7 @@ def build(db_path: str | None = None) -> tuple[Agent, dict]:
                  "chunks": len(index.chunks), "state": store.kind, "tracing": "otlp" if tracer else "off",
                  "cache": {"corpus_version": corpus_version}, "injection_screen": "patterns + prompt guard" if guard else "patterns",
                  "queue": os.getenv("WAKEEL_QUEUE") == "1", "retention_days": RETENTION_DAYS})
-    deps = Deps(model, index, ledger, cache=SemanticCache(index.embedder, corpus_version), guard=guard,
+    deps = Deps(model, index, ledger, cache=SemanticCache(index.embedder, corpus_version), guard=guard, require_guard=guards.guard_required(),
                 dual_approval_halalas=int(float(os.getenv("WAKEEL_DUAL_APPROVAL_SAR", "1000")) * 100))
     return Agent(deps, checkpointer=checkpointer, store=store, on_spans=on_spans), info
 
