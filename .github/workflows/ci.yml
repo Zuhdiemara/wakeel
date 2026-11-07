@@ -1,9 +1,14 @@
 name: ci
 on: [push, pull_request]
 permissions: { contents: read, packages: write }
+# A newer push to the same branch or PR replaces the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17
@@ -15,8 +20,8 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.13", cache: pip }
       - run: pip install -r requirements-dev.txt -c constraints.txt
       - run: GEMINI_API_KEY= GROQ_API_KEY= python -m pytest -q
@@ -30,8 +35,9 @@ jobs:
   image:
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -t wakeel .
       - name: The container starts and answers
         run: |
@@ -59,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: helm/kind-action@v1
         with: { cluster_name: wakeel }
       - name: Build the image and load it into the cluster
@@ -123,9 +129,10 @@ jobs:
   # container image (OS packages and libraries), on every push.
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.13" }
       - name: Install exactly what the image installs
         run: pip install -r requirements.txt -c constraints.txt && pip install pip-audit bandit
@@ -148,9 +155,10 @@ jobs:
   load:
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.13", cache: pip }
       - run: pip install -r requirements.txt -c constraints.txt
       - run: |
@@ -165,6 +173,7 @@ jobs:
   restore-drill:
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     services:
       postgres:
         image: postgres:17
@@ -172,8 +181,8 @@ jobs:
         ports: ["5432:5432"]
         options: --health-cmd pg_isready --health-interval 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.13", cache: pip }
       - run: pip install -r requirements.txt -c constraints.txt
       - run: |

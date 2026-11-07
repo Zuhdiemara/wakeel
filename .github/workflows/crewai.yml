@@ -10,23 +10,45 @@ permissions: { contents: read }
 jobs:
   # The same task built with CrewAI, measured with the same cases and attacks.
   # Needs the GROQ_API_KEY repository secret (free tier); skipped without it.
+  # Another provider: set the CREW_API_KEY secret and the CREW_MODEL and
+  # CREW_BASE_URL repository variables (Settings → Secrets and variables).
   crewai:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 55          # a full run takes 25-30 min; the free tier's pacing can stretch it
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      CREW_API_KEY: ${{ secrets.CREW_API_KEY }}
+      CREW_MODEL: ${{ vars.CREW_MODEL || 'openai/openai/gpt-oss-20b' }}
+      CREW_BASE_URL: ${{ vars.CREW_BASE_URL || 'https://api.groq.com/openai/v1' }}
     steps:
       - id: ready
-        run: '[ -n "$GROQ_API_KEY" ] && echo "ok=1" >> "$GITHUB_OUTPUT" || echo "::notice::GROQ_API_KEY secret not set; skipping the CrewAI comparison"'
+        run: '[ -n "$CREW_API_KEY$GROQ_API_KEY" ] && echo "ok=1" >> "$GITHUB_OUTPUT" || echo "::notice::No CREW_API_KEY or GROQ_API_KEY secret; skipping the CrewAI comparison"'
       - if: steps.ready.outputs.ok
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - if: steps.ready.outputs.ok
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with: { python-version: "3.13" }
       - if: steps.ready.outputs.ok
         run: pip install crewai numpy httpx
+      # Runs finished before an earlier attempt ran out of quota; this run continues from them.
+      - if: steps.ready.outputs.ok
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/crew_progress.json
+          key: crew-progress-${{ github.run_id }}
+          restore-keys: crew-progress-
       - if: steps.ready.outputs.ok
         run: |
-          set -o pipefail
-          python -m crew.dispute_crew | tee crew.log
+          set +e -o pipefail
+          python -m crew.dispute_crew | tee crew.log; code=$?
+          set -e
+          # 75: the quota ran out mid-run; the finished runs are kept and tomorrow's run continues.
+          if [ "$code" = 75 ]; then echo "::warning::$(grep PAUSED crew.log | tail -1)"; exit 0; fi
+          [ "$code" = 0 ] || exit "$code"
           { echo "### CrewAI on the same evaluation"; echo '```'; tail -1 crew.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      # Kept only while a measurement is unfinished (the script deletes the file when it completes).
+      - if: always() && steps.ready.outputs.ok && hashFiles('.cache/crew_progress.json') != ''
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/crew_progress.json
+          key: crew-progress-${{ github.run_id }}
