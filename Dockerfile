@@ -1,6 +1,8 @@
 FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PORT=8000
 WORKDIR /app
+# Debian's security fixes land before the next base image is published (e.g. zlib).
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt constraints.txt ./
 # Constraints pin safe versions of indirect dependencies.
 RUN pip install --no-cache-dir -r requirements.txt -c constraints.txt \
