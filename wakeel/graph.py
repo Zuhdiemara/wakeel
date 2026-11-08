@@ -640,6 +640,8 @@ class Agent:
             v["status"] = "awaiting_approval"
         elif snap.next and "clarify" in snap.next:
             v["status"] = "needs_info"
+        elif v.get("case_id"):
+            v.setdefault("status", "running")     # started, but intake has not written a status yet
         v["next"] = list(snap.next)
         v.pop("message", None)                    # only the redacted text leaves the agent
         return v

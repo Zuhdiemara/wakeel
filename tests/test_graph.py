@@ -213,3 +213,12 @@ def test_one_rejection_rejects_a_large_refund(index):
     agent.decide(c["case_id"], True, "noura")
     c = agent.decide(c["case_id"], False, "fahad", "needs the receipt")
     assert c["status"] == "rejected" and ledger.refund_calls == 0
+
+
+def test_a_case_a_worker_just_started_reads_as_running(make_agent):
+    # The first checkpoint holds only the input; intake has not set a status yet.
+    from types import SimpleNamespace
+    agent, _ = make_agent(None)
+    agent.graph.get_state = lambda cfg: SimpleNamespace(values={"case_id": "c1", "customer": "sara", "message": "hi"}, next=("intake",))
+    c = agent.get("c1")
+    assert c["status"] == "running" and "message" not in c
